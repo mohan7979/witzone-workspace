@@ -1,0 +1,70 @@
+name: Build Windows Agent (.exe)
+
+on:
+  # Run automatically when agent code changes
+  push:
+    paths:
+      - 'desktop-agent/**'
+  # Also allow manual trigger from GitHub Actions tab
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: desktop-agent
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements-windows.txt
+
+      - name: Build with PyInstaller
+        run: pyinstaller agent.spec --clean --noconfirm
+
+      - name: Verify build
+        run: |
+          if (Test-Path "dist\WitzoneAgent.exe") {
+            $size = (Get-Item "dist\WitzoneAgent.exe").Length / 1MB
+            Write-Host "Build successful: WitzoneAgent.exe ($([math]::Round($size,1)) MB)"
+          } else {
+            Write-Host "ERROR: exe not found"
+            exit 1
+          }
+        shell: pwsh
+
+      - name: Upload exe as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: WitzoneAgent-Windows
+          path: desktop-agent/dist/WitzoneAgent.exe
+          retention-days: 30
+
+      - name: Create GitHub Release (on tag push)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: desktop-agent/dist/WitzoneAgent.exe
+          name: Witzone Agent ${{ github.ref_name }}
+          body: |
+            ## Witzone Workspace Agent ${{ github.ref_name }}
+
+            ### Installation
+            1. Download `WitzoneAgent.exe`
+            2. Copy it to `C:\Program Files\Witzone\` (or anywhere convenient)
+            3. Double-click to run — it appears in the system tray
+            4. Right-click tray icon → **Login / Re-authenticate**
+            5. Enter the employee's email and password
+            6. Credentials are saved — agent starts tracking automatically
+
+            ### Auto-start on Windows login (recommended)
+            Press `Win+R`, type `shell:startup`, press Enter.
+            Create a shortcut to `WitzoneAgent.exe` in that folder.
