@@ -1,0 +1,65 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+
+  --color-brand-50:  #eff6ff;
+  --color-brand-100: #dbeafe;
+  --color-brand-500: #3b82f6;
+  --color-brand-600: #2563eb;
+  --color-brand-700: #1d4ed8;
+
+  --color-navy-900: #0f172a;
+  --color-navy-800: #1e293b;
+  --color-navy-700: #334155;
+
+  --color-surface: #f8fafc;
+  --color-card:    #ffffff;
+
+  --shadow-sm:  0 1px 2px 0 rgb(0 0 0 / .05);
+  --shadow-md:  0 4px 6px -1px rgb(0 0 0 / .07), 0 2px 4px -2px rgb(0 0 0 / .07);
+  --shadow-lg:  0 10px 15px -3px rgb(0 0 0 / .08), 0 4px 6px -4px rgb(0 0 0 / .05);
+  --shadow-xl:  0 20px 25px -5px rgb(0 0 0 / .1),  0 8px 10px -6px rgb(0 0 0 / .05);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; -webkit-text-size-adjust: 100%; }
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #f8fafc;
+  color: #0f172a;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+}
+
+#root { min-height: 100vh; display: flex; flex-direction: column; }
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 99px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* Focus */
+:focus-visible { outline: 2px solid #3b82f6; outline-offset: 2px; }
+
+/* Table */
+table { width: 100%; border-collapse: collapse; }
+
+/* Transitions */
+button, a { transition: all 150ms ease; }
+input, select, textarea {
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+}
+
+/* Animations */
+@keyframes spin    { to { transform: rotate(360deg); } }
+@keyframes fadeIn  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes pulse   { 0%,100% { opacity: 1; } 50% { opacity: .5; } }
+
+.animate-spin  { animation: spin 0.7s linear infinite; }
+.animate-fade  { animation: fadeIn 200ms ease forwards; }
+.animate-pulse { animation: pulse 2s ease-in-out infinite; }

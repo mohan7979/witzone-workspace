@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "mcp__Claude_in_Chrome__find",
+      "mcp__Claude_in_Chrome__form_input",
+      "mcp__Claude_in_Chrome__computer",
+      "mcp__Claude_in_Chrome__navigate",
+      "mcp__Claude_in_Chrome__javascript_tool",
+      "Bash(tail -5 /tmp/bpo_backend.log | grep -E \"\\(login|401|200\\)\")",
+      "Bash(mysql -u root -pmuruganthunai bpo_workforce -e \"SELECT email, role, password_reset_required FROM users WHERE email='admin@company.com';\")",
+      "Bash(node -e ' *)",
+      "Bash(xargs cat)",
+      "Bash(node --check backend/src/index.js)",
+      "Bash(node --check backend/src/controllers/idleController.js)",
+      "Bash(node --check backend/src/controllers/reportController.js)",
+      "Bash(node --check backend/src/controllers/attendanceController.js)",
+      "Bash(node --check backend/src/controllers/leaveController.js)",
+      "Bash(npm --prefix frontend run build)",
+      "Bash(pm2 logs *)",
+      "Bash(mysql -u root -e \"DESCRIBE bpo_workforce.users;\")"
+    ]
+  }
+}
