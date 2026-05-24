@@ -254,7 +254,7 @@ def _windows_login_dialog():
     try:
         script = (
             'Add-Type -AssemblyName Microsoft.VisualBasic;'
-            '$url = [Microsoft.VisualBasic.Interaction]::InputBox("Server URL (e.g. http://192.168.1.10:5000)", "Witzone Login", "http://");'
+            '$url = [Microsoft.VisualBasic.Interaction]::InputBox("Server URL", "Witzone Login", "https://witzone.moksfix.com");'
             '$email = [Microsoft.VisualBasic.Interaction]::InputBox("Email", "Witzone Login", "");'
             '$pass = [Microsoft.VisualBasic.Interaction]::InputBox("Password", "Witzone Login", "");'
             'Write-Output "$url|$email|$pass"'
