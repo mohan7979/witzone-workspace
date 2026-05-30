@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, Search, X, KeyRound, UserX, UserCheck, Users } from 'lucide-react';
-import { userApi, authApi, masterApi } from '@/api';
+import { userApi, authApi, masterApi, leaveApi } from '@/api';
 import Badge from '@/components/ui/Badge';
 import toast from 'react-hot-toast';
 
@@ -32,11 +32,20 @@ const S = {
 
 function CreateUserModal({ onClose }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ first_name:'', last_name:'', email:'', role:'employee', department:'', designation:'', phone:'', shift_start:'09:00', shift_end:'18:00' });
+  const [form, setForm] = useState({
+    employee_id:'', first_name:'', last_name:'', email:'',
+    role:'employee', department:'', designation:'', phone:'',
+    shift_id:'', manager_id:'', dob:'', doj:'',
+  });
   const fv = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
-  const { data: deptData } = useQuery({ queryKey:['master-departments'], queryFn:masterApi.listDepartments, staleTime:5*60*1000 });
-  const departments = (deptData?.data || []).filter(d => d.is_active).map(d => d.name);
+  const { data: deptData }  = useQuery({ queryKey:['master-departments'], queryFn:masterApi.listDepartments, staleTime:5*60*1000 });
+  const { data: shiftData } = useQuery({ queryKey:['master-shifts'],      queryFn:masterApi.listShifts,       staleTime:5*60*1000 });
+  const { data: leadsData } = useQuery({ queryKey:['users-leads'],        queryFn:() => userApi.list({ role:'lead', limit:100 }), staleTime:5*60*1000 });
+
+  const departments = (deptData?.data  || []).filter(d => d.is_active).map(d => d.name);
+  const shifts      = (shiftData?.data || []).filter(s => s.is_active);
+  const leads       = (leadsData?.data || []);
 
   const create = useMutation({
     mutationFn: userApi.create,
@@ -68,11 +77,29 @@ function CreateUserModal({ onClose }) {
         </div>
 
         <form onSubmit={(e) => { e.preventDefault(); create.mutate(form); }} style={{ padding:'24px', display:'flex', flexDirection:'column', gap:'16px' }}>
+
+          {/* Employee ID */}
+          <div>
+            <label style={S.label}>Employee ID <span style={{ color:'#F87171', fontSize:'10px' }}>*Manual</span></label>
+            <input required placeholder="e.g. EMP0010" value={form.employee_id} onChange={fv('employee_id')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+          </div>
+
+          {/* Name */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
             <div><label style={S.label}>First Name</label><input required value={form.first_name} onChange={fv('first_name')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
             <div><label style={S.label}>Last Name</label><input required value={form.last_name} onChange={fv('last_name')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
           </div>
+
+          {/* Email */}
           <div><label style={S.label}>Work Email</label><input type="email" required value={form.email} onChange={fv('email')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
+
+          {/* DOB + DOJ */}
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+            <div><label style={S.label}>Date of Birth</label><input type="date" value={form.dob} onChange={fv('dob')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
+            <div><label style={S.label}>Date of Joining</label><input type="date" value={form.doj} onChange={fv('doj')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
+          </div>
+
+          {/* Role + Department */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
             <div>
               <label style={S.label}>Role</label>
@@ -90,13 +117,37 @@ function CreateUserModal({ onClose }) {
               </select>
             </div>
           </div>
+
+          {/* Designation + Phone */}
           <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
             <div><label style={S.label}>Designation</label><input value={form.designation} onChange={fv('designation')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
             <div><label style={S.label}>Phone</label><input value={form.phone} onChange={fv('phone')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
           </div>
-          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-            <div><label style={S.label}>Shift Start</label><input type="time" value={form.shift_start} onChange={fv('shift_start')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
-            <div><label style={S.label}>Shift End</label><input type="time" value={form.shift_end} onChange={fv('shift_end')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} /></div>
+
+          {/* Shift dropdown */}
+          <div>
+            <label style={S.label}>Shift</label>
+            <select value={form.shift_id} onChange={fv('shift_id')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+              <option value="" style={{ background:'#0D1117' }}>Select shift</option>
+              {shifts.map((s) => (
+                <option key={s.id} value={s.id} style={{ background:'#0D1117' }}>
+                  {s.name} ({s.start_time?.slice(0,5)} – {s.end_time?.slice(0,5)})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Team Lead (manager) */}
+          <div>
+            <label style={S.label}>Assign Team Lead</label>
+            <select value={form.manager_id} onChange={fv('manager_id')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+              <option value="" style={{ background:'#0D1117' }}>— No TL assigned —</option>
+              {leads.map((l) => (
+                <option key={l.id} value={l.id} style={{ background:'#0D1117' }}>
+                  {l.first_name} {l.last_name} ({l.department || 'No dept'})
+                </option>
+              ))}
+            </select>
           </div>
           <div style={{ display:'flex', gap:'12px', paddingTop:'4px' }}>
             <button type="button" onClick={onClose} style={{

@@ -18,11 +18,12 @@ export const attendanceApi = {
 };
 
 export const leaveApi = {
-  apply: (data) => api.post('/leaves', data),
-  myLeaves: (params) => api.get('/leaves/my', { params }),
-  cancel: (id) => api.patch(`/leaves/${id}/cancel`),
-  pending: (params) => api.get('/leaves/pending', { params }),
-  review: (id, data) => api.patch(`/leaves/${id}/review`, data),
+  apply:    (data)     => api.post('/leaves', data),
+  myLeaves: (params)   => api.get('/leaves/my', { params }),
+  cancel:   (id)       => api.patch(`/leaves/${id}/cancel`),
+  pending:  (params)   => api.get('/leaves/pending', { params }),
+  tlReview: (id, data) => api.patch(`/leaves/${id}/tl-review`, data),
+  hrReview: (id, data) => api.patch(`/leaves/${id}/hr-review`, data),
 };
 
 export const userApi = {

@@ -15,7 +15,10 @@ Attendance.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
 
 User.hasMany(Leave, { foreignKey: 'user_id', as: 'leaves' });
 Leave.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
-Leave.belongsTo(User, { foreignKey: 'reviewed_by', as: 'reviewer' });
+Leave.belongsTo(User, { foreignKey: 'reviewed_by',    as: 'reviewer' });
+Leave.belongsTo(User, { foreignKey: 'tl_reviewed_by', as: 'tlReviewer' });
+
+User.belongsTo(ShiftTemplate, { foreignKey: 'shift_id', as: 'shift' });
 
 User.hasMany(IdleLog, { foreignKey: 'user_id', as: 'idleLogs' });
 IdleLog.belongsTo(User, { foreignKey: 'user_id', as: 'user' });

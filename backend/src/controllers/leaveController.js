@@ -1,19 +1,31 @@
 const { Op }   = require('sequelize');
 const moment   = require('moment');
 const { Leave, User, Attendance } = require('../models');
-const { sendLeaveNotificationEmail } = require('../utils/mailer');
+const {
+  sendLeaveNotificationEmail,
+  sendTlNotificationEmail,
+  sendHrNotificationEmail,
+} = require('../utils/mailer');
 const asyncHandler = require('../utils/asyncHandler');
 
 const LEAVE_BALANCE_FIELDS = {
   casual:   'casual_leave_balance',
   sick:     'sick_leave_balance',
   comp_off: 'comp_off_balance',
+  wfh:      'wfh_leave_balance',
+  wfo:      'wfo_leave_balance',
+  marriage: 'marriage_leave_balance',
+  maternity:'maternity_leave_balance',
 };
 
-const VALID_TYPES = ['casual', 'sick', 'comp_off', 'permission', 'unpaid'];
+const VALID_TYPES = [
+  'casual', 'sick', 'comp_off', 'permission', 'unpaid',
+  'wfh', 'wfo', 'marriage', 'maternity',
+];
 
+// ─── Apply for leave ──────────────────────────────────────────────────────────
 exports.apply = asyncHandler(async (req, res) => {
-  const { type, start_date, end_date, start_time, end_time, reason } = req.body;
+  const { type, start_date, end_date, start_time, end_time, reason, document_note } = req.body;
 
   if (!type || !VALID_TYPES.includes(type))
     return res.status(400).json({ message: `type must be one of: ${VALID_TYPES.join(', ')}` });
@@ -52,30 +64,42 @@ exports.apply = asyncHandler(async (req, res) => {
   if (overlap)
     return res.status(400).json({ message: 'You already have a leave request overlapping these dates' });
 
-  // Check balance (only for types that consume a balance)
+  // Check balance
   const balanceField = LEAVE_BALANCE_FIELDS[type];
   if (balanceField && parseFloat(req.user[balanceField]) < duration_days)
     return res.status(400).json({ message: `Insufficient ${type} leave balance` });
 
+  // If employee has no manager, TL stage is skipped — set tl_status to approved immediately
+  const skipTl = !req.user.manager_id;
+
   const leave = await Leave.create({
     user_id:  req.user.id,
     type, start_date,
-    end_date:   isPermission ? start_date : end_date,
-    start_time: isPermission ? start_time : null,
-    end_time:   isPermission ? end_time   : null,
+    end_date:      isPermission ? start_date : end_date,
+    start_time:    isPermission ? start_time : null,
+    end_time:      isPermission ? end_time   : null,
     duration_days, reason,
-    status: 'pending',
+    document_note: document_note || null,
+    status:    'pending',
+    tl_status: skipTl ? 'approved' : null,
   });
 
-  // Notify all leads and HR
-  const managers = await User.findAll({ where: { role: { [Op.in]: ['lead', 'hr'] }, status: 'active' } });
-  for (const m of managers) {
-    sendLeaveNotificationEmail(m.email, req.user, leave, 'new').catch(() => {}); // non-blocking
+  if (skipTl) {
+    // No TL — notify all HR users directly
+    const hrs = await User.findAll({ where: { role: 'hr', status: 'active' } });
+    for (const hr of hrs) {
+      sendHrNotificationEmail(hr.email, req.user, leave, 'N/A (no TL assigned)').catch(() => {});
+    }
+  } else {
+    // Notify the assigned TL
+    const tl = await User.findByPk(req.user.manager_id);
+    if (tl) sendTlNotificationEmail(tl.email, req.user, leave).catch(() => {});
   }
 
   res.status(201).json({ message: 'Leave application submitted', leave });
 });
 
+// ─── My leaves ───────────────────────────────────────────────────────────────
 exports.myLeaves = asyncHandler(async (req, res) => {
   const { status, page = 1, limit = 20 } = req.query;
   const where = { user_id: req.user.id };
@@ -83,7 +107,10 @@ exports.myLeaves = asyncHandler(async (req, res) => {
 
   const { count, rows } = await Leave.findAndCountAll({
     where,
-    include: [{ model: User, as: 'reviewer', attributes: ['first_name', 'last_name'] }],
+    include: [
+      { model: User, as: 'reviewer',   attributes: ['first_name', 'last_name'], required: false },
+      { model: User, as: 'tlReviewer', attributes: ['first_name', 'last_name'], required: false },
+    ],
     order:  [['created_at', 'DESC']],
     limit:  parseInt(limit),
     offset: (parseInt(page) - 1) * parseInt(limit),
@@ -91,6 +118,7 @@ exports.myLeaves = asyncHandler(async (req, res) => {
   res.json({ total: count, data: rows });
 });
 
+// ─── Cancel leave ─────────────────────────────────────────────────────────────
 exports.cancel = asyncHandler(async (req, res) => {
   const leave = await Leave.findOne({ where: { id: req.params.id, user_id: req.user.id } });
   if (!leave) return res.status(404).json({ message: 'Leave not found' });
@@ -98,7 +126,6 @@ exports.cancel = asyncHandler(async (req, res) => {
   if (!['pending', 'approved'].includes(leave.status))
     return res.status(400).json({ message: 'Only pending or approved leaves can be cancelled' });
 
-  // Approved future leave: refund balance and revert attendance records
   if (leave.status === 'approved') {
     if (moment(leave.start_date).isBefore(moment(), 'day'))
       return res.status(400).json({ message: 'Cannot cancel a leave that has already started' });
@@ -110,7 +137,6 @@ exports.cancel = asyncHandler(async (req, res) => {
       await user.update({ [balanceField]: restored });
     }
 
-    // Revert attendance on_leave rows back to absent (only future dates)
     let curr = moment(leave.start_date);
     const endDate = moment(leave.end_date);
     while (curr.isSameOrBefore(endDate)) {
@@ -127,25 +153,52 @@ exports.cancel = asyncHandler(async (req, res) => {
   res.json({ message: 'Leave cancelled' });
 });
 
-// HR / Lead: list leaves — defaults to pending, accepts any status
+// ─── Pending leaves list (scoped by role) ─────────────────────────────────────
 exports.pendingLeaves = asyncHandler(async (req, res) => {
-  const { type, status = 'pending', page = 1, limit = 20 } = req.query;
-  const where = {};
-  if (status !== 'all') where.status = status;
-  if (type) where.type = type;
+  const { type, status, page = 1, limit = 20 } = req.query;
+  const isHR   = req.user.role === 'hr';
+  const isLead = req.user.role === 'lead';
 
-  const userWhere = { status: 'active' };
-  if (req.user.role === 'lead') userWhere.manager_id = req.user.id;
+  const leaveWhere = {};
+  const userWhere  = { status: 'active' };
+
+  if (type) leaveWhere.type = type;
+
+  if (isLead) {
+    // Lead sees only leaves pending their TL review (tl_status = null)
+    userWhere.manager_id = req.user.id;
+    if (status && status !== 'pending') {
+      // Historical view — show their team's leaves with any status
+      if (status !== 'all') leaveWhere.status = status;
+    } else {
+      leaveWhere.status    = 'pending';
+      leaveWhere.tl_status = null;
+    }
+  } else if (isHR) {
+    if (!status || status === 'pending') {
+      // HR sees leaves where TL approved, waiting final HR decision
+      leaveWhere.tl_status = 'approved';
+      leaveWhere.status    = 'pending';
+    } else if (status === 'all') {
+      // No filter — show everything
+    } else {
+      leaveWhere.status = status;
+    }
+  }
 
   const { count, rows } = await Leave.findAndCountAll({
-    where,
-    include: [{
-      model: User, as: 'user', where: userWhere,
-      attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department',
-                   'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance'],
-    }, {
-      model: User, as: 'reviewer', attributes: ['first_name', 'last_name'], required: false,
-    }],
+    where: leaveWhere,
+    include: [
+      {
+        model: User, as: 'user', where: userWhere,
+        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department',
+                     'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
+                     'wfh_leave_balance', 'wfo_leave_balance', 'marriage_leave_balance',
+                     'maternity_leave_balance'],
+      },
+      { model: User, as: 'reviewer',   attributes: ['first_name', 'last_name'], required: false },
+      { model: User, as: 'tlReviewer', attributes: ['first_name', 'last_name'], required: false },
+    ],
     order:  [['created_at', 'DESC']],
     limit:  parseInt(limit),
     offset: (parseInt(page) - 1) * parseInt(limit),
@@ -153,7 +206,8 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
   res.json({ total: count, data: rows });
 });
 
-exports.review = asyncHandler(async (req, res) => {
+// ─── TL Level-1 review ────────────────────────────────────────────────────────
+exports.tlReview = asyncHandler(async (req, res) => {
   const { action, comment } = req.body;
   if (!['approved', 'rejected'].includes(action))
     return res.status(400).json({ message: 'Action must be approved or rejected' });
@@ -164,18 +218,60 @@ exports.review = asyncHandler(async (req, res) => {
   if (!leave) return res.status(404).json({ message: 'Leave not found' });
   if (leave.status !== 'pending')
     return res.status(400).json({ message: 'Leave is no longer pending' });
+  if (leave.tl_status !== null)
+    return res.status(400).json({ message: 'This leave has already been reviewed at TL level' });
 
-  // Maker-checker: the person who applied cannot approve/reject their own leave
-  if (String(leave.user_id) === String(req.user.id))
-    return res.status(400).json({ message: 'You cannot review your own leave request' });
+  // Only the assigned manager can TL-review
+  if (String(leave.user.manager_id) !== String(req.user.id))
+    return res.status(403).json({ message: 'You are not the assigned TL for this employee' });
 
   await leave.update({
-    status: action, reviewed_by: req.user.id,
-    reviewer_comment: comment, reviewed_at: new Date(),
+    tl_status:      action,
+    tl_reviewed_by: req.user.id,
+    tl_comment:     comment || null,
+    tl_reviewed_at: new Date(),
+    // TL rejection ends the flow immediately
+    ...(action === 'rejected' ? { status: 'rejected', reviewed_by: req.user.id, reviewer_comment: comment, reviewed_at: new Date() } : {}),
   });
 
   if (action === 'approved') {
-    // Deduct balance
+    // Notify all HR users for final decision
+    const hrs = await User.findAll({ where: { role: 'hr', status: 'active' } });
+    const tlName = `${req.user.first_name} ${req.user.last_name}`;
+    for (const hr of hrs) {
+      sendHrNotificationEmail(hr.email, leave.user, leave, tlName).catch(() => {});
+    }
+    res.json({ message: 'Leave forwarded to HR for final approval', leave });
+  } else {
+    // Notify employee of TL rejection
+    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'tl_rejected').catch(() => {});
+    res.json({ message: 'Leave rejected', leave });
+  }
+});
+
+// ─── HR Level-2 final review ──────────────────────────────────────────────────
+exports.hrReview = asyncHandler(async (req, res) => {
+  const { action, comment } = req.body;
+  if (!['approved', 'rejected'].includes(action))
+    return res.status(400).json({ message: 'Action must be approved or rejected' });
+
+  const leave = await Leave.findByPk(req.params.id, {
+    include: [{ model: User, as: 'user' }],
+  });
+  if (!leave) return res.status(404).json({ message: 'Leave not found' });
+  if (leave.status !== 'pending')
+    return res.status(400).json({ message: 'Leave is no longer pending' });
+  if (leave.tl_status !== 'approved')
+    return res.status(400).json({ message: 'TL approval is required before HR can act' });
+
+  await leave.update({
+    status:           action,
+    reviewed_by:      req.user.id,
+    reviewer_comment: comment || null,
+    reviewed_at:      new Date(),
+  });
+
+  if (action === 'approved') {
     const balanceField = LEAVE_BALANCE_FIELDS[leave.type];
     if (balanceField) {
       const user = leave.user;
@@ -183,7 +279,6 @@ exports.review = asyncHandler(async (req, res) => {
       await user.update({ [balanceField]: Math.max(0, newBalance) });
     }
 
-    // Mark attendance — only update status if no clock-in exists for that day
     let curr = moment(leave.start_date);
     const endDate = moment(leave.end_date);
     while (curr.isSameOrBefore(endDate)) {
@@ -192,7 +287,6 @@ exports.review = asyncHandler(async (req, res) => {
       if (!existing) {
         await Attendance.create({ user_id: leave.user_id, date: day, status: 'on_leave' });
       } else if (!existing.login_time) {
-        // Only update status if employee hasn't actually clocked in
         await existing.update({ status: 'on_leave' });
       }
       curr.add(1, 'day');
