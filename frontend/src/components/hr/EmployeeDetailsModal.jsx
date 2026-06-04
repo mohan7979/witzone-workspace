@@ -16,6 +16,15 @@ const blurStyle  = (e) => { e.target.style.borderColor='rgba(255,255,255,0.1)'; 
 
 // Editable profile fields (the rest of the master data comes from MasterDataFields).
 const PROFILE_FIELDS = ['first_name','last_name','phone','dob','doj'];
+// HR-editable leave allocation. Maternity is shown only for married employees.
+const LEAVE_FIELDS = [
+  ['casual_leave_balance',   'Claimed Leave'],
+  ['sick_leave_balance',     'Sick Leave'],
+  ['comp_off_balance',       'Comp Off'],
+  ['long_leave_balance',     'Long Leave'],
+  ['marriage_leave_balance', 'Marriage Leave'],
+  ['maternity_leave_balance','Maternity Leave'],
+];
 const MASTER_FIELDS = [
   'blood_group','qualification','marital_status','spouse_name','mobile_2','personal_email',
   'present_address','permanent_address','aadhaar_address',
@@ -41,6 +50,7 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
     if (user) {
       const seed = {};
       [...PROFILE_FIELDS, ...MASTER_FIELDS].forEach((k) => { seed[k] = user[k] ?? ''; });
+      LEAVE_FIELDS.forEach(([k]) => { seed[k] = user[k] ?? ''; });
       setForm(seed);
     }
   }, [user]);
@@ -51,6 +61,12 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
     mutationFn: () => {
       const payload = {};
       [...PROFILE_FIELDS, ...MASTER_FIELDS].forEach((k) => { payload[k] = form[k] === '' ? null : form[k]; });
+      // Leave balances → numbers (skip blanks). Maternity = married only.
+      const married = form.marital_status === 'married';
+      LEAVE_FIELDS.forEach(([k]) => {
+        if (k === 'maternity_leave_balance' && !married) { payload[k] = 0; return; }
+        if (form[k] !== '' && form[k] != null && !isNaN(parseFloat(form[k]))) payload[k] = parseFloat(form[k]);
+      });
       return userApi.update(userId, payload);
     },
     onSuccess: () => {
@@ -131,10 +147,32 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
               {/* Master data */}
               <MasterDataFields form={form} onField={onField} readOnly={!edit} />
 
+              {/* Leave Allocation */}
+              <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
+                <p style={S.sectionTitle}>Leave Allocation (days)</p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                  {LEAVE_FIELDS
+                    .filter(([k]) => k !== 'maternity_leave_balance' || form.marital_status === 'married')
+                    .map(([k, label]) => (
+                      <div key={k}>
+                        <label style={S.label}>{label}</label>
+                        {edit
+                          ? <input type="number" min="0" step="0.5" value={form[k] ?? ''} onChange={onField(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+                          : <div style={S.readVal}>{form[k] !== '' && form[k] != null ? `${form[k]} day${parseFloat(form[k]) === 1 ? '' : 's'}` : <span style={{ color:'rgba(241,245,249,0.25)' }}>—</span>}</div>}
+                      </div>
+                    ))}
+                </div>
+                {form.marital_status !== 'married' && edit && (
+                  <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)' }}>
+                    Maternity leave applies to married employees only — set Marital Status to “Married” above to allocate it.
+                  </p>
+                )}
+              </div>
+
               {/* Actions */}
               {edit && (
                 <div style={{ display:'flex', gap:'12px', paddingTop:'4px' }}>
-                  <button type="button" onClick={() => { setEdit(false); const seed={}; [...PROFILE_FIELDS,...MASTER_FIELDS].forEach(k=>{seed[k]=user[k]??'';}); setForm(seed); }} style={{ flex:1, padding:'12px', fontSize:'13px', fontWeight:600, color:'rgba(241,245,249,0.6)', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', cursor:'pointer' }}>
+                  <button type="button" onClick={() => { setEdit(false); const seed={}; [...PROFILE_FIELDS,...MASTER_FIELDS].forEach(k=>{seed[k]=user[k]??'';}); LEAVE_FIELDS.forEach(([k])=>{seed[k]=user[k]??'';}); setForm(seed); }} style={{ flex:1, padding:'12px', fontSize:'13px', fontWeight:600, color:'rgba(241,245,249,0.6)', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', cursor:'pointer' }}>
                     Cancel
                   </button>
                   <button onClick={() => save.mutate()} disabled={save.isPending} style={{ flex:1, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'7px', padding:'12px', fontSize:'13px', fontWeight:700, color:'white', background: save.isPending ? 'rgba(139,92,246,0.5)' : 'linear-gradient(135deg,#A78BFA,#8B5CF6)', border:'none', borderRadius:'10px', cursor: save.isPending ? 'not-allowed' : 'pointer', boxShadow: save.isPending ? 'none' : '0 4px 16px rgba(139,92,246,0.4)' }}>
