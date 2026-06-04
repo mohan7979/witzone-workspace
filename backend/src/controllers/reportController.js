@@ -98,31 +98,53 @@ exports.idleReport = asyncHandler(async (req, res) => {
   res.json({ start: startDate, end: endDate, data });
 });
 
+// Pending-leave count scoped to what THIS role actually acts on — kept identical
+// to leaveController.pendingLeaves so the dashboard stat matches the list.
+async function countActionablePending(req) {
+  const role = req.user.role;
+  const leaveWhere = { status: 'pending' };
+  const userWhere  = { status: 'active' };
+
+  if (role === 'lead') {
+    userWhere.manager_id = req.user.id;
+    leaveWhere.tl_status = null;
+  } else if (role === 'hr') {
+    leaveWhere[Op.or] = [{ tl_status: 'approved' }, { tl_skipped: true }];
+    userWhere.role = 'employee';
+  } else if (role === 'superuser') {
+    leaveWhere[Op.or] = [{ tl_status: 'approved' }, { tl_skipped: true }];
+    userWhere.role = { [Op.in]: ['lead', 'hr', 'superuser'] };
+  } else {
+    return 0;
+  }
+  return Leave.count({ where: leaveWhere, include: [{ model: User, as: 'user', where: userWhere, attributes: [] }] });
+}
+
 exports.dashboardStats = asyncHandler(async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
-
-  // Count ALL active users (employees + leads + HR) — matches what the Employees page shows
   const allActiveWhere = buildUserWhere(req);
+  const userInc = [{ model: User, as: 'user', where: allActiveWhere, attributes: [] }];
 
-  const [totalEmployees, presentToday, pendingLeaves] = await Promise.all([
+  // Counts are defined to MATCH the Team Attendance tabs exactly (status-based),
+  // so the dashboard number equals the list you see when you click it:
+  //   present  = today's records with status 'present'
+  //   absent   = active employees with NO non-absent record today
+  //   on_leave / half_day = their respective statuses
+  const [totalEmployees, presentToday, nonAbsentToday, onLeaveToday, halfDayToday, pendingLeaves] = await Promise.all([
     User.count({ where: allActiveWhere }),
-
-    // Present = clocked in today (any role)
-    Attendance.count({
-      where: { date: today, login_time: { [Op.ne]: null } },
-      include: [{ model: User, as: 'user', where: allActiveWhere, attributes: [] }],
-    }),
-
-    Leave.count({
-      where: { status: 'pending' },
-      include: [{ model: User, as: 'user', where: allActiveWhere, attributes: [] }],
-    }),
+    Attendance.count({ where: { date: today, status: 'present' },              include: userInc }),
+    Attendance.count({ where: { date: today, status: { [Op.ne]: 'absent' } },  include: userInc }),
+    Attendance.count({ where: { date: today, status: 'on_leave' },             include: userInc }),
+    Attendance.count({ where: { date: today, status: 'half_day' },             include: userInc }),
+    countActionablePending(req),
   ]);
 
   res.json({
     total_employees: totalEmployees,
     present_today:   presentToday,
-    absent_today:    Math.max(0, totalEmployees - presentToday),
+    absent_today:    Math.max(0, totalEmployees - nonAbsentToday),
+    on_leave_today:  onLeaveToday,
+    half_day_today:  halfDayToday,
     pending_leaves:  pendingLeaves,
   });
 });

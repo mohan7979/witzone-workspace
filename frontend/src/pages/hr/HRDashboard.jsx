@@ -103,8 +103,8 @@ function HolidayList({ holidays }) {
 
 const STATS = [
   { label: 'Total Employees', key: 'total',   icon: Users,        color: '#818CF8', glow: 'rgba(129,140,248,0.25)', gradient: 'linear-gradient(135deg,#6366F1,#8B5CF6)', route: '/employees' },
-  { label: 'Present Today',   key: 'present', icon: UserCheck,    color: '#34D399', glow: 'rgba(52,211,153,0.25)',  gradient: 'linear-gradient(135deg,#10B981,#34D399)', route: '/attendance' },
-  { label: 'Absent Today',    key: 'absent',  icon: UserX,        color: '#F87171', glow: 'rgba(248,113,113,0.25)', gradient: 'linear-gradient(135deg,#EF4444,#F87171)', route: '/attendance' },
+  { label: 'Present Today',   key: 'present', icon: UserCheck,    color: '#34D399', glow: 'rgba(52,211,153,0.25)',  gradient: 'linear-gradient(135deg,#10B981,#34D399)', route: '/attendance?filter=present' },
+  { label: 'Absent Today',    key: 'absent',  icon: UserX,        color: '#F87171', glow: 'rgba(248,113,113,0.25)', gradient: 'linear-gradient(135deg,#EF4444,#F87171)', route: '/attendance?filter=absent' },
   { label: 'Pending Leaves',  key: 'pending', icon: CalendarClock,color: '#FBBF24', glow: 'rgba(251,191,36,0.25)',  gradient: 'linear-gradient(135deg,#F59E0B,#FBBF24)', route: '/leaves'     },
 ];
 
@@ -170,13 +170,16 @@ export default function HRDashboard() {
   const pending = stats?.pending_leaves  || 0;
   const pct     = total ? Math.round((present / total) * 100) : 0;
 
+  const onLeave  = stats?.on_leave_today || 0;
+  const halfDay  = stats?.half_day_today || 0;
   const chartData = [
     { name:'Present',  count:present },
     { name:'Absent',   count:absent  },
-    { name:'On Leave', count:0       },
+    { name:'On Leave', count:onLeave },
+    { name:'Half Day', count:halfDay },
   ];
   const statValues = { total, present, absent, pending };
-  const statSubs   = { total:'Active accounts', present:`${pct}% attendance rate`, absent:`${total-present} not clocked in`, pending:'Awaiting approval' };
+  const statSubs   = { total:'Active accounts', present:`${pct}% attendance rate`, absent:`${absent} not present`, pending:'Awaiting your action' };
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
 
