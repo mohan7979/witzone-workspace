@@ -13,8 +13,12 @@ export const isHRLevel = (role) => role === 'hr' || role === 'superuser';
 export const formatDate = (date) =>
   date ? new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
 
+// 24-hour clock everywhere (e.g. 18:30, not 6:30 PM)
 export const formatTime = (date) =>
-  date ? new Date(date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true }) : '—';
+  date ? new Date(date).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: false }) : '—';
+
+// Format a stored "HH:MM:SS" / "HH:MM" time-of-day string as 24h "HH:MM"
+export const formatClock = (t) => (t ? String(t).slice(0, 5) : '—');
 
 export const formatDuration = (hours) => {
   if (!hours) return '—';
@@ -43,13 +47,35 @@ export const formatHMS = (seconds) => {
 
 // Human-readable leave-type labels (kept in sync with backend ENUM).
 export const LEAVE_TYPE_LABELS = {
-  casual: 'Casual Leave', sick: 'Sick Leave', comp_off: 'Comp Off',
+  casual: 'Claimed Leave', sick: 'Sick Leave', comp_off: 'Comp Off',
   permission: 'Permission', unpaid: 'Unpaid Leave',
   marriage: 'Marriage Leave', maternity: 'Maternity Leave',
+  long_leave: 'Long Leave',
 };
 
 export const leaveTypeLabel = (type) =>
   LEAVE_TYPE_LABELS[type] || (type ? type.replace(/_/g, ' ') : '—');
+
+// Duration label that respects hourly permissions and half-days (#5).
+// permission → hours from start/end; half-day → "Half Day (HH:MM–HH:MM)"; else "N day(s)".
+export const leaveDurationLabel = (leave) => {
+  if (!leave) return '—';
+  if (leave.type === 'permission' && leave.start_time && leave.end_time) {
+    const [sh, sm] = leave.start_time.split(':').map(Number);
+    const [eh, em] = leave.end_time.split(':').map(Number);
+    const mins = (eh * 60 + em) - (sh * 60 + sm);
+    if (mins > 0) {
+      const h = Math.floor(mins / 60), m = mins % 60;
+      return m ? `${h}h ${m}m` : `${h} hour${h === 1 ? '' : 's'}`;
+    }
+  }
+  if (leave.is_half_day) {
+    const win = leave.start_time && leave.end_time ? ` (${leave.start_time.slice(0,5)}–${leave.end_time.slice(0,5)})` : '';
+    return `Half Day${win}`;
+  }
+  const d = parseFloat(leave.duration_days);
+  return isNaN(d) ? '—' : `${d} day${d === 1 ? '' : 's'}`;
+};
 
 // Single source of truth for a leave/permission request's current stage. The two
 // approval levels (TL → HR) plus the no-TL bypass collapse into one clear label,

@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 /* ─── Design tokens ─── */
 // "personal" = casual_leave_balance — max and carry-forward depend on work_mode
 const TOKENS = {
-  personal: { color:'#818CF8', rgb:'129,140,248', label:'Personal Leave', icon:Umbrella,
+  personal: { color:'#818CF8', rgb:'129,140,248', label:'Claimed Leave', icon:Umbrella,
                maxWfo:12, maxWfh:8, carryMax:16,
                annual:true, carryForwardWfh:true, carryForwardWfo:false,
                policy_wfo:'12 days / year · resets annually',

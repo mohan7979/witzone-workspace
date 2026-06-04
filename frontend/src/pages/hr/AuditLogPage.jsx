@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ShieldCheck, ArrowRight } from 'lucide-react';
 import { auditApi } from '@/api';
+import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 
 const glass = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
 
@@ -34,7 +35,7 @@ const FILTERS = [
 
 function fmtWhen(ts) {
   if (!ts) return '—';
-  return new Date(ts).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:true });
+  return new Date(ts).toLocaleString('en-IN', { day:'2-digit', month:'short', year:'numeric', hour:'2-digit', minute:'2-digit', hour12:false });
 }
 
 export default function AuditLogPage() {
@@ -45,7 +46,11 @@ export default function AuditLogPage() {
     refetchInterval: 60000,
   });
 
-  const rows = data?.data || [];
+  const tc = useTableControls(data?.data || [], {
+    searchKeys: ['actor_name', 'actor_role', 'entity_label', 'action', 'new_value', 'old_value'],
+    initialSort: { key: 'created_at', dir: 'desc' },
+    pageSize: 15,
+  });
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'24px', animation:'slide-up 0.4s ease' }}>
@@ -71,13 +76,20 @@ export default function AuditLogPage() {
       </div>
 
       <div style={glass}>
+        <TableToolbar search={tc.search} setSearch={tc.setSearch} total={tc.total} placeholder="Search actor, subject or change…" />
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', minWidth:'900px', borderCollapse:'collapse' }}>
-            <thead><tr>{['When','Performed By','Action','Subject','Change'].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+            <thead><tr>
+              <SortTh label="When"         sortKey="created_at" sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Performed By" sortKey="actor_name" sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Action"       sortKey="action"     sort={tc.sort} toggleSort={tc.toggleSort} />
+              <th style={S.th}>Subject</th>
+              <th style={S.th}>Change</th>
+            </tr></thead>
             <tbody>
               {isLoading && <tr><td colSpan={5} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
-              {!isLoading && !rows.length && <tr><td colSpan={5} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No audit events</td></tr>}
-              {rows.map((e) => {
+              {!isLoading && !tc.total && <tr><td colSpan={5} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No audit events</td></tr>}
+              {tc.view.map((e) => {
                 const color = ACTION_COLORS[e.action] || '#94A3B8';
                 const decision = e.metadata?.decision;
                 return (
@@ -111,6 +123,7 @@ export default function AuditLogPage() {
             </tbody>
           </table>
         </div>
+        <Pagination page={tc.page} pageCount={tc.pageCount} setPage={tc.setPage} total={tc.total} pageSize={tc.pageSize} />
       </div>
     </div>
   );

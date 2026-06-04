@@ -157,15 +157,12 @@ function DesignationsPanel({ tab }) {
   const [adding, setAdding]   = useState(false);
   const [editing, setEditing] = useState(null);
   const { data } = useQuery({ queryKey:['master-designations'], queryFn: masterApi.listDesignations });
-  const { data:deptData } = useQuery({ queryKey:['master-departments'], queryFn: masterApi.listDepartments });
-  const departments = (deptData?.data || []).map(d => d.name);
 
   const create = useMutation({ mutationFn: masterApi.createDesignation, onSuccess:() => { toast.success('Designation added'); qc.invalidateQueries(['master-designations']); setAdding(false); }, onError:(e) => toast.error(e.message) });
   const update = useMutation({ mutationFn:({ id, data }) => masterApi.updateDesignation(id, data), onSuccess:() => { toast.success('Updated'); qc.invalidateQueries(['master-designations']); setEditing(null); }, onError:(e) => toast.error(e.message) });
   const remove = useMutation({ mutationFn: masterApi.deleteDesignation, onSuccess:() => { toast.success('Deleted'); qc.invalidateQueries(['master-designations']); }, onError:(e) => toast.error(e.message) });
 
   const rows = data?.data || [];
-  const deptOptions = [{ value:'', label:'— No Department —' }, ...departments.map(d => ({ value:d, label:d }))];
   return (
     <div style={glass}>
       <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -177,16 +174,15 @@ function DesignationsPanel({ tab }) {
         </button>
       </div>
       <table style={{ width:'100%', borderCollapse:'collapse' }}>
-        <thead><tr><th style={S.th}>Name</th><th style={S.th}>Department</th><th style={S.th}>Status</th><th style={S.th}>Actions</th></tr></thead>
+        <thead><tr><th style={S.th}>Name</th><th style={S.th}>Status</th><th style={S.th}>Actions</th></tr></thead>
         <tbody>
           {adding && (
             <EditableRow
               fields={[
                 { key:'name', placeholder:'Designation name' },
-                { key:'department', type:'select', value:'', options:deptOptions },
                 { key:'is_active', type:'select', value:'true', options:[{value:'true',label:'Active'},{value:'false',label:'Inactive'}] },
               ]}
-              onSave={(v) => create.mutate({ name:v.name, department:v.department || null, is_active: v.is_active !== 'false' })}
+              onSave={(v) => create.mutate({ name:v.name, is_active: v.is_active !== 'false' })}
               onCancel={() => setAdding(false)} />
           )}
           {rows.map(r => (
@@ -194,17 +190,15 @@ function DesignationsPanel({ tab }) {
               <EditableRow key={r.id}
                 fields={[
                   { key:'name', value:r.name, placeholder:'Designation name' },
-                  { key:'department', type:'select', value:r.department||'', options:deptOptions },
                   { key:'is_active', type:'select', value:String(r.is_active), options:[{value:'true',label:'Active'},{value:'false',label:'Inactive'}] },
                 ]}
-                onSave={(v) => update.mutate({ id:r.id, data:{ name:v.name, department:v.department||null, is_active: v.is_active !== 'false' } })}
+                onSave={(v) => update.mutate({ id:r.id, data:{ name:v.name, is_active: v.is_active !== 'false' } })}
                 onCancel={() => setEditing(null)} />
             ) : (
               <tr key={r.id} style={{ transition:'background 0.12s' }}
                 onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
                 onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                 <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>{r.name}</td>
-                <td style={S.td}>{r.department ? <span style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'6px', padding:'3px 8px', fontSize:'12px' }}>{r.department}</span> : <span style={{ color:'rgba(241,245,249,0.25)' }}>—</span>}</td>
                 <td style={S.td}>
                   <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 9px', borderRadius:'6px', fontSize:'11px', fontWeight:700, background: r.is_active ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.15)', color: r.is_active ? '#34D399' : '#F87171', border:`1px solid ${r.is_active ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)'}` }}>
                     <span style={{ width:'5px', height:'5px', borderRadius:'50%', background: r.is_active ? '#34D399' : '#F87171' }} />
@@ -224,7 +218,7 @@ function DesignationsPanel({ tab }) {
               </tr>
             )
           ))}
-          {!rows.length && !adding && <tr><td colSpan={4} style={{ padding:'40px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No designations yet.</td></tr>}
+          {!rows.length && !adding && <tr><td colSpan={3} style={{ padding:'40px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No designations yet.</td></tr>}
         </tbody>
       </table>
     </div>

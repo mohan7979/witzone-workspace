@@ -29,6 +29,7 @@ const User = sequelize.define('User', {
   qualification:  { type: DataTypes.STRING(150) },
   marital_status: { type: DataTypes.ENUM('single', 'married'), allowNull: true },
   spouse_name:    { type: DataTypes.STRING(100) },
+  spouse_mobile:  { type: DataTypes.STRING(15) },   // shown only when married
   // Contact information (phone = primary mobile / "mobile_1")
   mobile_2:       { type: DataTypes.STRING(15) },
   personal_email: { type: DataTypes.STRING(120) },   // separate from login email
@@ -67,6 +68,7 @@ const User = sequelize.define('User', {
   comp_off_balance:       { type: DataTypes.DECIMAL(4, 1), defaultValue:  0.0 },  // earned, granted by HR
   marriage_leave_balance: { type: DataTypes.DECIMAL(4, 1), defaultValue:  5.0 },  // one-time 5d
   maternity_leave_balance:{ type: DataTypes.DECIMAL(4, 1), defaultValue: 90.0 },  // one-time 90d
+  long_leave_balance:     { type: DataTypes.DECIMAL(4, 1), defaultValue:  0.0 },  // HR-allocated
 
   last_login:              { type: DataTypes.DATE },
   last_heartbeat:          { type: DataTypes.DATE },

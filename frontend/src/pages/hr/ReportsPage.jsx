@@ -4,6 +4,7 @@ import { Download, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from
 import { reportApi, userApi } from '@/api';
 import Badge from '@/components/ui/Badge';
 import { formatDate, formatTime, formatDuration, formatIdleTime, formatHMS } from '@/lib/utils';
+import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 import toast from 'react-hot-toast';
 
 const glass = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -107,6 +108,13 @@ export default function ReportsPage() {
   const leaveReport = useQuery({ queryKey:['report-leaves', leaveParams],    queryFn:() => reportApi.leaves(leaveParams),    enabled:tab==='leaves'     });
   const idleReport  = useQuery({ queryKey:['report-idle', idleParams],       queryFn:() => reportApi.idle(idleParams),       enabled:tab==='idle'       });
   const activity    = useQuery({ queryKey:['report-activity', activityParams], queryFn:() => reportApi.activity(activityParams), enabled:tab==='activity' });
+
+  // Search + sort + pagination for the Activity Log table.
+  const actTc = useTableControls(activity.data?.data || [], {
+    searchKeys: ['name', 'employee_id', 'department', 'status', 'date'],
+    initialSort: { key: 'date', dir: 'desc' },
+    pageSize: 15,
+  });
 
   const activeTab = TABS.find(t => t.key === tab);
 
@@ -264,13 +272,19 @@ export default function ReportsPage() {
           </div>
 
           <div style={glass}>
+            <TableToolbar search={actTc.search} setSearch={actTc.setSearch} total={actTc.total} placeholder="Search name, ID, dept or status…" />
             <div style={{ overflowX:'auto' }}>
               <table style={{ width:'100%', minWidth:'1100px', borderCollapse:'collapse' }}>
-                <thead><tr>{['Date','Employee','Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time','Status'].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                <thead><tr>
+                  <SortTh label="Date"     sortKey="date"   sort={actTc.sort} toggleSort={actTc.toggleSort} />
+                  <SortTh label="Employee" sortKey="name"   sort={actTc.sort} toggleSort={actTc.toggleSort} />
+                  {['Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time'].map(h => <th key={h} style={S.th}>{h}</th>)}
+                  <SortTh label="Status"   sortKey="status" sort={actTc.sort} toggleSort={actTc.toggleSort} />
+                </tr></thead>
                 <tbody>
                   {activity.isLoading && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
-                  {!activity.isLoading && !activity.data?.data?.length && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
-                  {activity.data?.data?.map((row, i) => (
+                  {!activity.isLoading && !actTc.total && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
+                  {actTc.view.map((row, i) => (
                     <tr key={i} style={{ transition:'background 0.12s' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                       <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap' }}>{formatDate(row.date)}</td>
                       <td style={S.td}>
@@ -290,6 +304,7 @@ export default function ReportsPage() {
                 </tbody>
               </table>
             </div>
+            <Pagination page={actTc.page} pageCount={actTc.pageCount} setPage={actTc.setPage} total={actTc.total} pageSize={actTc.pageSize} />
           </div>
         </div>
       )}

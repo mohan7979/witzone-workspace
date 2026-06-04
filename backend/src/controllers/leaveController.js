@@ -5,17 +5,19 @@ const {
   sendLeaveNotificationEmail,
   sendTlNotificationEmail,
   sendHrNotificationEmail,
+  sendReviewerOutcomeEmail,
 } = require('../utils/mailer');
 const asyncHandler = require('../utils/asyncHandler');
 const { LEAVE_POLICY, computeAnnualReset } = require('../utils/leavePolicy');
 const { recordAudit } = require('../utils/audit');
 
 const LEAVE_BALANCE_FIELDS = {
-  casual:   'casual_leave_balance',
-  sick:     'sick_leave_balance',
-  comp_off: 'comp_off_balance',
-  marriage: 'marriage_leave_balance',
-  maternity:'maternity_leave_balance',
+  casual:     'casual_leave_balance',
+  sick:       'sick_leave_balance',
+  comp_off:   'comp_off_balance',
+  marriage:   'marriage_leave_balance',
+  maternity:  'maternity_leave_balance',
+  long_leave: 'long_leave_balance',
 };
 
 const VALID_TYPES = Object.keys(LEAVE_POLICY);
@@ -33,6 +35,7 @@ exports.apply = asyncHandler(async (req, res) => {
     return res.status(400).json({ message: 'reason is required' });
 
   const isPermission = type === 'permission';
+  const isHalfDay    = !isPermission && (req.body.is_half_day === true || req.body.is_half_day === 'true');
   let duration_days;
 
   if (isPermission) {
@@ -41,7 +44,16 @@ exports.apply = asyncHandler(async (req, res) => {
     const diff = moment(`${start_date} ${end_time}`).diff(moment(`${start_date} ${start_time}`), 'hours', true);
     if (diff <= 0)
       return res.status(400).json({ message: 'end_time must be after start_time' });
+    // Permission is measured in hours; we still persist a day-fraction for balance
+    // maths, but the exact hours come from start_time/end_time for display.
     duration_days = parseFloat((diff / 8).toFixed(2));
+  } else if (isHalfDay) {
+    // Half-day leave: a single date counted as 0.5 days, with a required time window.
+    if (!start_time || !end_time)
+      return res.status(400).json({ message: 'start_time and end_time are required for a half-day leave' });
+    if (moment(`${start_date} ${end_time}`).diff(moment(`${start_date} ${start_time}`), 'minutes', true) <= 0)
+      return res.status(400).json({ message: 'end_time must be after start_time' });
+    duration_days = 0.5;
   } else {
     if (!end_date)
       return res.status(400).json({ message: 'end_date is required' });
@@ -95,9 +107,10 @@ exports.apply = asyncHandler(async (req, res) => {
   const leave = await Leave.create({
     user_id:  req.user.id,
     type, start_date,
-    end_date:      isPermission ? start_date : end_date,
-    start_time:    isPermission ? start_time : null,
-    end_time:      isPermission ? end_time   : null,
+    end_date:      (isPermission || isHalfDay) ? start_date : end_date,
+    start_time:    (isPermission || isHalfDay) ? start_time : null,
+    end_time:      (isPermission || isHalfDay) ? end_time   : null,
+    is_half_day:   isHalfDay,
     duration_days, reason,
     document_note: document_note || null,
     document_file: uploadedFile || null,
@@ -230,9 +243,9 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     include: [
       {
         model: User, as: 'user', where: userWhere,
-        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'work_mode',
+        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'role', 'department', 'work_mode',
                      'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
-                     'marriage_leave_balance', 'maternity_leave_balance'],
+                     'marriage_leave_balance', 'maternity_leave_balance', 'long_leave_balance'],
       },
       { model: User, as: 'reviewer',   attributes: ['first_name', 'last_name'], required: false },
       { model: User, as: 'tlReviewer', attributes: ['first_name', 'last_name'], required: false },
@@ -286,6 +299,8 @@ exports.tlReview = asyncHandler(async (req, res) => {
     for (const hr of hrs) {
       sendHrNotificationEmail(hr.email, leave.user, leave, tlName).catch(() => {});
     }
+    // Keep the employee informed: TL approved, now pending HR.
+    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'tl_approved').catch(() => {});
     res.json({ message: 'Leave forwarded to HR for final approval', leave });
   } else {
     // Notify employee of TL rejection
@@ -351,7 +366,14 @@ exports.hrReview = asyncHandler(async (req, res) => {
     metadata: { decision: action, comment: comment || null, stage: 'hr', tl_skipped: leave.tl_skipped },
   });
 
+  // Notify the requester of the final outcome.
   sendLeaveNotificationEmail(leave.user.email, leave.user, leave, action).catch(() => {});
+  // FYI to the TL who reviewed it (if any, and not the same person acting now).
+  if (leave.tl_reviewed_by && String(leave.tl_reviewed_by) !== String(req.user.id)) {
+    const tl = await User.findByPk(leave.tl_reviewed_by, { attributes: ['email', 'first_name', 'last_name'] });
+    if (tl) sendReviewerOutcomeEmail(tl.email, `${tl.first_name} ${tl.last_name}`, leave.user, leave, action,
+      req.user.role === 'superuser' ? 'Superuser' : 'HR').catch(() => {});
+  }
   res.json({ message: `Leave ${action}`, leave });
 });
 

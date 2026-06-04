@@ -55,6 +55,31 @@ input, select, textarea {
   transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
+/* Date / time picker icons — the app uses a dark (Midnight Glass) theme, so force
+   the native pickers to render their calendar/clock icons in light (#15: icons
+   were very dull on the dark inputs). */
+input[type="date"],
+input[type="time"],
+input[type="datetime-local"],
+input[type="month"],
+input[type="week"] {
+  color-scheme: dark;
+}
+input[type="date"]::-webkit-calendar-picker-indicator,
+input[type="time"]::-webkit-calendar-picker-indicator,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator,
+input[type="month"]::-webkit-calendar-picker-indicator,
+input[type="week"]::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(1.8);
+  opacity: 0.9;
+  cursor: pointer;
+}
+input[type="date"]::-webkit-calendar-picker-indicator:hover,
+input[type="time"]::-webkit-calendar-picker-indicator:hover,
+input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  opacity: 1;
+}
+
 /* Animations */
 @keyframes spin    { to { transform: rotate(360deg); } }
 @keyframes fadeIn  { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }

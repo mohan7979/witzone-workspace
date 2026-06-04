@@ -33,17 +33,14 @@ exports.deleteDepartment = asyncHandler(async (req, res) => {
 /* ─── DESIGNATIONS ─────────────────────────────────────────────────── */
 
 exports.listDesignations = asyncHandler(async (req, res) => {
-  const { department } = req.query;
-  const where = {};
-  if (department) where.department = department;
-  const rows = await Designation.findAll({ where, order: [['name', 'ASC']] });
+  const rows = await Designation.findAll({ order: [['name', 'ASC']] });
   res.json({ data: rows });
 });
 
 exports.createDesignation = asyncHandler(async (req, res) => {
-  const { name, department } = req.body;
+  const { name } = req.body;
   if (!name) return res.status(400).json({ message: 'Name is required' });
-  const desig = await Designation.create({ name: name.trim(), department: department?.trim() });
+  const desig = await Designation.create({ name: name.trim() });
   res.status(201).json({ data: desig });
 });
 

@@ -10,7 +10,7 @@ const WORK_MODE_LABELS = { wfo: 'Work From Office (WFO)', wfh: 'Work From Home (
 
 // Employee Master Data fields (Personal Details form) — editable by HR on create/update.
 const MASTER_FIELDS = [
-  'blood_group', 'qualification', 'marital_status', 'spouse_name',
+  'blood_group', 'qualification', 'marital_status', 'spouse_name', 'spouse_mobile',
   'mobile_2', 'personal_email',
   'present_address', 'permanent_address', 'aadhaar_address',
   'father_name', 'father_mobile', 'mother_name', 'mother_mobile', 'sibling_details',
@@ -20,10 +20,27 @@ const MASTER_FIELDS = [
   'bank_account_number', 'bank_ifsc',
 ];
 
+// HR-settable leave balances (for mid-year joiners / custom allocation).
+const LEAVE_BALANCE_FIELDS = [
+  'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
+  'marriage_leave_balance', 'maternity_leave_balance', 'long_leave_balance',
+];
+
 function pickMasterFields(body) {
   const out = {};
   for (const f of MASTER_FIELDS) {
     if (body[f] !== undefined) out[f] = body[f] === '' ? null : body[f];
+  }
+  return out;
+}
+
+// Read any custom leave balances HR entered on the form (blank = use default).
+function pickLeaveBalances(body) {
+  const out = {};
+  for (const f of LEAVE_BALANCE_FIELDS) {
+    if (body[f] !== undefined && body[f] !== '' && body[f] !== null && !isNaN(parseFloat(body[f]))) {
+      out[f] = parseFloat(body[f]);
+    }
   }
   return out;
 }
@@ -52,6 +69,9 @@ exports.createUser = asyncHandler(async (req, res) => {
     ? LEAVE_POLICY.casual.annual_days_wfh   // 8
     : LEAVE_POLICY.casual.annual_days_wfo;  // 12
 
+  // If the employee is not married, maternity leave is not applicable (force 0).
+  const isMarried = req.body.marital_status === 'married';
+
   const user = await User.create({
     employee_id, first_name, last_name, email, role,
     department, designation, phone, shift_id, manager_id,
@@ -60,7 +80,9 @@ exports.createUser = asyncHandler(async (req, res) => {
     casual_leave_balance: personalLeaveBalance,
     password: tempPassword,
     password_reset_required: true,
-    ...pickMasterFields(req.body),   // Employee Master Data (optional on create)
+    ...pickMasterFields(req.body),     // Employee Master Data (optional on create)
+    ...pickLeaveBalances(req.body),    // HR custom leave allocation (overrides defaults)
+    ...(isMarried ? {} : { maternity_leave_balance: 0 }),  // maternity = married only
   });
 
   sendWelcomeEmail(email, first_name, employee_id, tempPassword).catch(() => {});
@@ -111,8 +133,7 @@ exports.updateUser = asyncHandler(async (req, res) => {
   const allowed = [
     'first_name', 'last_name', 'department', 'designation', 'phone',
     'shift_id', 'role', 'status', 'manager_id', 'dob', 'doj', 'work_mode',
-    'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
-    'marriage_leave_balance', 'maternity_leave_balance',
+    ...LEAVE_BALANCE_FIELDS,
     ...MASTER_FIELDS,
   ];
   const updates = {};

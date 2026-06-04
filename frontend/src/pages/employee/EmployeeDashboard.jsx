@@ -16,7 +16,7 @@ const S = {
 };
 
 const BALANCE_CARDS = [
-  { key:'casual_leave_balance',  label:'Personal Leave', suffix:'d', color:'#818CF8', glow:'rgba(129,140,248,0.3)', gradient:'linear-gradient(135deg,#6366F1,#8B5CF6)', icon:CalendarCheck },
+  { key:'casual_leave_balance',  label:'Claimed Leave', suffix:'d', color:'#818CF8', glow:'rgba(129,140,248,0.3)', gradient:'linear-gradient(135deg,#6366F1,#8B5CF6)', icon:CalendarCheck },
   { key:'sick_leave_balance',    label:'Sick Leave',     suffix:'d', color:'#34D399', glow:'rgba(52,211,153,0.3)',  gradient:'linear-gradient(135deg,#10B981,#34D399)', icon:Clock         },
   { key:'comp_off_balance',      label:'Comp Off',       suffix:'d', color:'#F472B6', glow:'rgba(244,114,182,0.3)',gradient:'linear-gradient(135deg,#EC4899,#F472B6)', icon:TrendingUp    },
 ];

@@ -3,7 +3,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, X, GitBranch } from 'lucide-react';
 import { leaveApi } from '@/api';
 import useAuthStore from '@/store/authStore';
-import { formatDate, leaveStage } from '@/lib/utils';
+import { formatDate, leaveStage, leaveDurationLabel } from '@/lib/utils';
+import LeaveWorkflowModal from '@/components/LeaveWorkflowModal';
+import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 import toast from 'react-hot-toast';
 
 const glass = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -16,8 +18,8 @@ const S = {
 };
 
 const TYPE_LABELS = {
-  casual:'Personal', sick:'Sick', comp_off:'Comp Off', permission:'Permission',
-  unpaid:'Unpaid', marriage:'Marriage', maternity:'Maternity',
+  casual:'Claimed Leave', sick:'Sick', comp_off:'Comp Off', permission:'Permission',
+  unpaid:'Unpaid', marriage:'Marriage', maternity:'Maternity', long_leave:'Long Leave',
 };
 
 function TlStatusBadge({ status, skipped }) {
@@ -186,6 +188,7 @@ export default function LeaveManagementPage() {
   const isHRLevel = isHR || isSuper;   // Level-2 final reviewers
 
   const [selected, setSelected] = useState(null);
+  const [detail,   setDetail]   = useState(null);
   const [filter,   setFilter]   = useState('pending');
 
   const FILTERS = isLead
@@ -195,6 +198,12 @@ export default function LeaveManagementPage() {
   const { data, isLoading } = useQuery({
     queryKey: ['pending-leaves', filter],
     queryFn:  () => leaveApi.pending({ status: filter, limit: 100 }),
+  });
+
+  const tc = useTableControls(data?.data || [], {
+    searchKeys: ['user.first_name', 'user.last_name', 'user.department', 'type', 'reason'],
+    initialSort: { key: 'created_at', dir: 'desc' },
+    pageSize: 12,
   });
 
   const pageTitle = isLead ? 'Team Leave Requests' : isSuper ? 'Leave Approvals — TL & HR' : 'Leave Management';
@@ -247,27 +256,36 @@ export default function LeaveManagementPage() {
 
       {/* Table */}
       <div style={glass}>
+        <TableToolbar search={tc.search} setSearch={tc.setSearch} total={tc.total} placeholder="Search employee, type or reason…" />
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', minWidth:'900px', borderCollapse:'collapse' }}>
             <thead>
               <tr>
-                {['Employee','Type','Period','Days','Reason','Applied','TL Status', isHRLevel ? 'TL Reviewer' : null,'Current Status',''].filter(Boolean).map((h) => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
+                <SortTh label="Employee" sortKey="user.first_name" sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="Type"     sortKey="type"           sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}>Period</th>
+                <th style={S.th}>Duration</th>
+                <th style={S.th}>Reason</th>
+                <SortTh label="Applied"  sortKey="created_at"     sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}>TL Status</th>
+                {isHRLevel && <th style={S.th}>TL Reviewer</th>}
+                <SortTh label="Current Status" sortKey="status"   sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}></th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>
               )}
-              {!isLoading && !data?.data?.length && (
+              {!isLoading && !tc.total && (
                 <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
                   No {filter === 'pending' && isLead ? 'pending TL review' : filter} leave requests
                 </td></tr>
               )}
-              {data?.data?.map((leave) => (
+              {tc.view.map((leave) => (
                 <tr key={leave.id}
-                  style={{ transition:'background 0.12s' }}
+                  onClick={() => setDetail(leave)}
+                  style={{ transition:'background 0.12s', cursor:'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
                   onMouseLeave={e => e.currentTarget.style.background='transparent'}>
 
@@ -287,7 +305,7 @@ export default function LeaveManagementPage() {
                   <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap' }}>
                     {formatDate(leave.start_date)} — {formatDate(leave.end_date)}
                   </td>
-                  <td style={{ ...S.td, fontWeight:700, color:'#F1F5F9' }}>{leave.duration_days}</td>
+                  <td style={{ ...S.td, fontWeight:700, color:'#F1F5F9', whiteSpace:'nowrap' }}>{leaveDurationLabel(leave)}</td>
                   <td style={{ ...S.td, maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
                     {leave.reason}
                   </td>
@@ -312,7 +330,7 @@ export default function LeaveManagementPage() {
 
                   <td style={S.td}>
                     {canReview(leave) && (
-                      <button onClick={() => setSelected(leave)} style={{
+                      <button onClick={(e) => { e.stopPropagation(); setSelected(leave); }} style={{
                         fontSize:'12px', fontWeight:700,
                         color: isLead ? '#FBBF24' : '#818CF8',
                         background: isLead ? 'rgba(251,191,36,0.1)' : 'rgba(129,140,248,0.1)',
@@ -330,11 +348,13 @@ export default function LeaveManagementPage() {
             </tbody>
           </table>
         </div>
+        <Pagination page={tc.page} pageCount={tc.pageCount} setPage={tc.setPage} total={tc.total} pageSize={tc.pageSize} />
       </div>
 
       {selected && (
         <ReviewModal leave={selected} role={user?.role} onClose={() => setSelected(null)} />
       )}
+      {detail && <LeaveWorkflowModal leave={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useRef, useEffect, useState } from 'react';
 import { idleApi } from '@/api';
 import { formatHMS, formatTime } from '@/lib/utils';
+import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -24,7 +25,7 @@ function IdleTimelineModal({ userId, date, name, onClose }) {
 
   const formatHHMM = (iso) => {
     if (!iso) return '—';
-    return new Date(iso).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:true });
+    return new Date(iso).toLocaleTimeString('en-IN', { hour:'2-digit', minute:'2-digit', hour12:false });
   };
 
   const timeline  = data?.timeline || [];
@@ -169,6 +170,19 @@ export default function IdleMonitorPage() {
   const today = new Date().toISOString().split('T')[0];
   const { data:team } = useQuery({ queryKey:['idle-team', today], queryFn:() => idleApi.teamSummary({ date:today }) });
 
+  // Normalise the aggregated idle rows so search/sort work on plain fields.
+  const idleRows = (team?.data || []).map((r) => ({
+    user: r.user,
+    _idle:   parseInt(r.dataValues?.total_idle_seconds || r.total_idle_seconds || 0),
+    _break:  parseInt(r.total_break_seconds || 0),
+    _events: r.dataValues?.idle_events || r.idle_events || 0,
+  }));
+  const stc = useTableControls(idleRows, {
+    searchKeys: ['user.first_name', 'user.last_name', 'user.employee_id', 'user.department'],
+    initialSort: { key: '_idle', dir: 'desc' },
+    pageSize: 10,
+  });
+
   const active       = live?.active       || [];
   const idle         = live?.idle         || [];
   const disconnected = live?.disconnected || [];
@@ -290,21 +304,30 @@ export default function IdleMonitorPage() {
           <p style={{ fontSize:'14px', fontWeight:700, color:'#F1F5F9', letterSpacing:'-0.2px' }}>Today's Idle Summary</p>
           <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>Aggregated idle time per employee</p>
         </div>
+        <TableToolbar search={stc.search} setSearch={stc.setSearch} total={stc.total} placeholder="Search name, ID or department…" />
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
-              <tr>{['Employee','Department','Idle Events','Total Idle Time','Total Break Time','Risk Level',''].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr>
+              <tr>
+                <SortTh label="Employee"   sortKey="user.first_name" sort={stc.sort} toggleSort={stc.toggleSort} />
+                <SortTh label="Department"  sortKey="user.department" sort={stc.sort} toggleSort={stc.toggleSort} />
+                <SortTh label="Idle Events" sortKey="_events" sort={stc.sort} toggleSort={stc.toggleSort} />
+                <SortTh label="Total Idle Time" sortKey="_idle" sort={stc.sort} toggleSort={stc.toggleSort} />
+                <SortTh label="Total Break Time" sortKey="_break" sort={stc.sort} toggleSort={stc.toggleSort} />
+                <th style={S.th}>Risk Level</th>
+                <th style={S.th}></th>
+              </tr>
             </thead>
             <tbody>
-              {!team?.data?.length ? (
+              {!stc.total ? (
                 <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No idle data recorded today</td></tr>
               ) : (
-                team.data.map((row, i) => {
-                  const secs      = parseInt(row.dataValues?.total_idle_seconds || row.total_idle_seconds || 0);
-                  const breakSecs = parseInt(row.total_break_seconds || 0);
+                stc.view.map((row, i) => {
+                  const secs      = row._idle;
+                  const breakSecs = row._break;
                   const isHigh    = secs > HIGH_IDLE;
                   return (
-                    <tr key={i} style={{ transition:'background 0.12s' }}
+                    <tr key={row.user?.id || i} style={{ transition:'background 0.12s' }}
                       onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
                       onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                       <td style={S.td}>
@@ -312,7 +335,7 @@ export default function IdleMonitorPage() {
                         <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)', marginTop:'2px' }}>{row.user?.employee_id}</p>
                       </td>
                       <td style={S.td}>{row.user?.department || '—'}</td>
-                      <td style={{ ...S.td, fontWeight:600 }}>{row.dataValues?.idle_events || row.idle_events || 0}</td>
+                      <td style={{ ...S.td, fontWeight:600 }}>{row._events}</td>
                       <td style={{ ...S.td, fontWeight:700, color: isHigh ? '#F87171' : '#34D399', fontVariantNumeric:'tabular-nums' }}>{formatHMS(secs)}</td>
                       <td style={{ ...S.td, fontWeight:700, color:'#FBBF24', fontVariantNumeric:'tabular-nums' }}>{formatHMS(breakSecs)}</td>
                       <td style={S.td}>
@@ -340,6 +363,7 @@ export default function IdleMonitorPage() {
             </tbody>
           </table>
         </div>
+        <Pagination page={stc.page} pageCount={stc.pageCount} setPage={stc.setPage} total={stc.total} pageSize={stc.pageSize} />
       </div>
 
       {timeline && <IdleTimelineModal userId={timeline.userId} date={timeline.date} name={timeline.name} onClose={() => setTimeline(null)} />}

@@ -10,8 +10,11 @@ const LEAVE_POLICY = {
   // "Personal Leave" — quota depends on the employee's work_mode:
   //   WFH employees: 8 days/year, unused balance carries forward (max 16)
   //   WFO employees: 12 days/year, resets every year
+  // "Claimed Leave" (formerly "Personal Leave") — quota depends on work_mode:
+  //   WFH employees: 8 days/year, unused balance carries forward (max 16)
+  //   WFO employees: 12 days/year, resets every year
   casual: {
-    label:               'Personal Leave',
+    label:               'Claimed Leave',
     annual_days_wfh:     8,
     annual_days_wfo:     12,
     carry_forward_wfh:   true,
@@ -19,6 +22,7 @@ const LEAVE_POLICY = {
     carry_forward_wfo:   false,
     requires_document:   false,
     max_at_once:         null,
+    half_day_allowed:    true,   // can be applied as half day with a time window
     description:         'WFH: 8 days/year (carry forward, max 16) · WFO: 12 days/year (resets annually)',
     color:               '#818CF8',
   },
@@ -28,8 +32,18 @@ const LEAVE_POLICY = {
     carry_forward:    false,
     requires_document:true,     // ← policy: MUST submit document/note
     max_at_once:      null,
+    half_day_allowed: true,     // can be applied as half day with a time window
     description:      '12 days per year. Medical document note is mandatory.',
     color:            '#F472B6',
+  },
+  long_leave: {
+    label:            'Long Leave',
+    annual_days:      null,     // HR-allocated, not an annual entitlement
+    carry_forward:    false,
+    requires_document:false,
+    max_at_once:      null,
+    description:      'Extended leave. Balance is allocated by HR.',
+    color:            '#38BDF8',
   },
   marriage: {
     label:            'Marriage Leave',
@@ -88,6 +102,7 @@ const DEFAULT_BALANCES = {
   marriage_leave_balance: LEAVE_POLICY.marriage.max_at_once,     // 5
   maternity_leave_balance:LEAVE_POLICY.maternity.max_at_once,    // 90
   comp_off_balance:       0,                                     // earned, starts at 0
+  long_leave_balance:     0,                                     // HR-allocated, starts at 0
 };
 
 /**

@@ -3,7 +3,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, CalendarDays, FileText, Upload, CheckCircle } from 'lucide-react';
 import { leaveApi, authApi } from '@/api';
 import Badge from '@/components/ui/Badge';
-import { formatDate } from '@/lib/utils';
+import { formatDate, leaveDurationLabel } from '@/lib/utils';
+import useAuthStore from '@/store/authStore';
+import LeaveWorkflowModal from '@/components/LeaveWorkflowModal';
+import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 import toast from 'react-hot-toast';
 
 const glass = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -22,14 +25,18 @@ const onBlur  = (e) => { e.target.style.borderColor = 'rgba(255,255,255,0.1)'; e
 // WFH employees get 8 days personal leave (carry-forward), WFO employees get 12 days (resets)
 // The balance shown to the employee reflects their work mode — only one "Personal Leave" type exists
 const LEAVE_TYPES = [
-  { value:'casual',     label:'Personal Leave',      policy:'WFH: 8 days/yr (carry forward) · WFO: 12 days/yr' },
+  { value:'casual',     label:'Claimed Leave',       policy:'WFH: 8 days/yr (carry forward) · WFO: 12 days/yr' },
   { value:'sick',       label:'Sick Leave',          policy:'12 days / year · medical document / doctor note is mandatory' },
   { value:'marriage',   label:'Marriage Leave',      policy:'One-time entitlement of 5 days' },
   { value:'maternity',  label:'Maternity Leave',     policy:'One-time entitlement of up to 90 days (3 months)' },
   { value:'comp_off',   label:'Comp Off',            policy:'Earned by working on holidays / weekends · granted by HR' },
-  { value:'permission', label:'Permission (Hourly)', policy:'Short hourly permission · calculated as fraction of a day' },
+  { value:'long_leave', label:'Long Leave',          policy:'Extended leave · balance allocated by HR' },
+  { value:'permission', label:'Permission (Hourly)', policy:'Short hourly permission · entered and shown in hours' },
   { value:'unpaid',     label:'Unpaid Leave',        policy:'Leave without pay · no balance required' },
 ];
+
+// Leave types that can be applied as a half day (with a time window).
+const HALF_DAY_TYPES = ['casual', 'sick'];
 
 const TYPE_LABELS = Object.fromEntries(LEAVE_TYPES.map(t => [t.value, t.label]));
 const FILTERS = ['all', 'pending', 'approved', 'rejected'];
@@ -46,20 +53,22 @@ function TlStatusPill({ leave }) {
 
 // Maps leave type to the user balance field name
 const BALANCE_KEYS = {
-  casual:   'casual_leave_balance',
-  sick:     'sick_leave_balance',
-  comp_off: 'comp_off_balance',
-  marriage: 'marriage_leave_balance',
-  maternity:'maternity_leave_balance',
+  casual:     'casual_leave_balance',
+  sick:       'sick_leave_balance',
+  comp_off:   'comp_off_balance',
+  marriage:   'marriage_leave_balance',
+  maternity:  'maternity_leave_balance',
+  long_leave: 'long_leave_balance',
 };
 
 // Human-friendly balance labels
 const BALANCE_LABELS = {
-  casual:   'Personal Leave',
-  sick:     'Sick Leave',
-  comp_off: 'Comp Off',
-  marriage: 'Marriage Leave',
-  maternity:'Maternity Leave',
+  casual:     'Claimed Leave',
+  sick:       'Sick Leave',
+  comp_off:   'Comp Off',
+  marriage:   'Marriage Leave',
+  maternity:  'Maternity Leave',
+  long_leave: 'Long Leave',
 };
 
 function BalancePill({ type, user }) {
@@ -85,10 +94,16 @@ function BalancePill({ type, user }) {
 function ApplyLeaveModal({ onClose }) {
   const qc = useQueryClient();
   const fileRef = useRef(null);
-  const [form, setForm]     = useState({ type:'casual', start_date:'', end_date:'', start_time:'', end_time:'', reason:'' });
+  const { user } = useAuthStore();
+  // Lead / HR / Superuser requests bypass the TL and are decided by a Superuser.
+  const isElevated = ['lead', 'hr', 'superuser'].includes(user?.role);
+  const [form, setForm]     = useState({ type:'casual', start_date:'', end_date:'', start_time:'', end_time:'', reason:'', is_half_day:false });
   const [sickFile, setSickFile] = useState(null);
-  const isPermission = form.type === 'permission';
-  const isSick       = form.type === 'sick';
+  const isPermission   = form.type === 'permission';
+  const isSick         = form.type === 'sick';
+  const canHalfDay     = HALF_DAY_TYPES.includes(form.type);
+  const isHalfDay      = canHalfDay && form.is_half_day;
+  const needsTimeWindow = isPermission || isHalfDay;
   const f = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const selectedType = LEAVE_TYPES.find(t => t.value === form.type);
@@ -104,7 +119,9 @@ function ApplyLeaveModal({ onClose }) {
   const apply = useMutation({
     mutationFn: leaveApi.apply,
     onSuccess: () => {
-      toast.success('Leave request submitted — your TL will be notified');
+      toast.success(isElevated
+        ? 'Request submitted — Superuser will be notified'
+        : 'Leave request submitted — your TL will be notified');
       qc.invalidateQueries(['my-leaves']);
       qc.invalidateQueries(['dashboard-stats']);
       qc.invalidateQueries(['auth-me-modal']);
@@ -119,13 +136,19 @@ function ApplyLeaveModal({ onClose }) {
       toast.error('Please upload a medical certificate for sick leave');
       return;
     }
+    if (needsTimeWindow && (!form.start_time || !form.end_time)) {
+      toast.error(isHalfDay ? 'Please enter the half-day time window' : 'Please enter the permission time window');
+      return;
+    }
+    // For a half-day, the leave is a single date.
+    const payload = { ...form, is_half_day: isHalfDay, end_date: (needsTimeWindow ? form.start_date : form.end_date) };
     if (isSick && sickFile) {
       const fd = new FormData();
-      Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
+      Object.entries(payload).forEach(([k, v]) => { if (v !== '' && v != null) fd.append(k, v); });
       fd.append('medical_cert', sickFile);
       apply.mutate(fd);
     } else {
-      apply.mutate(form);
+      apply.mutate(payload);
     }
   };
 
@@ -139,10 +162,12 @@ function ApplyLeaveModal({ onClose }) {
     if (fileRef.current) fileRef.current.value = '';
   };
 
-  // When switching away from sick, clear the file
+  // When switching type: clear the sick-cert file if leaving sick, and reset the
+  // half-day toggle if the new type can't be a half day.
   const handleTypeChange = (e) => {
-    setForm({ ...form, type: e.target.value });
-    if (e.target.value !== 'sick') {
+    const next = e.target.value;
+    setForm({ ...form, type: next, is_half_day: HALF_DAY_TYPES.includes(next) ? form.is_half_day : false });
+    if (next !== 'sick') {
       setSickFile(null);
       if (fileRef.current) fileRef.current.value = '';
     }
@@ -193,13 +218,33 @@ function ApplyLeaveModal({ onClose }) {
             )}
           </div>
 
-          {/* Dates */}
-          <div style={{ display:'grid', gridTemplateColumns: isPermission ? '1fr' : '1fr 1fr', gap:'12px' }}>
+          {/* Full day / Half day (Claimed & Sick) */}
+          {canHalfDay && (
             <div>
-              <label style={S.label}>{isPermission ? 'Date' : 'From Date'}</label>
+              <label style={S.label}>Duration</label>
+              <div style={{ display:'flex', gap:'8px' }}>
+                {[{ v:false, l:'Full Day' }, { v:true, l:'Half Day' }].map(({ v, l }) => {
+                  const active = form.is_half_day === v;
+                  return (
+                    <button key={l} type="button" onClick={() => setForm({ ...form, is_half_day: v })} style={{
+                      flex:1, padding:'10px', fontSize:'12px', fontWeight:700, borderRadius:'10px', cursor:'pointer', transition:'all 0.15s',
+                      background: active ? 'rgba(244,114,182,0.15)' : 'rgba(255,255,255,0.05)',
+                      color: active ? '#F472B6' : 'rgba(241,245,249,0.6)',
+                      border: `1.5px solid ${active ? 'rgba(244,114,182,0.5)' : 'rgba(255,255,255,0.1)'}`,
+                    }}>{l}</button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Dates — single date for permission & half-day, range otherwise */}
+          <div style={{ display:'grid', gridTemplateColumns: needsTimeWindow ? '1fr' : '1fr 1fr', gap:'12px' }}>
+            <div>
+              <label style={S.label}>{needsTimeWindow ? 'Date' : 'From Date'}</label>
               <input type="date" required value={form.start_date} onChange={f('start_date')} style={S.input} onFocus={onFocus} onBlur={onBlur} />
             </div>
-            {!isPermission && (
+            {!needsTimeWindow && (
               <div>
                 <label style={S.label}>To Date</label>
                 <input type="date" required value={form.end_date} onChange={f('end_date')} style={S.input} onFocus={onFocus} onBlur={onBlur} />
@@ -207,8 +252,8 @@ function ApplyLeaveModal({ onClose }) {
             )}
           </div>
 
-          {/* Time (permission only) */}
-          {isPermission && (
+          {/* Time window — permission OR half-day */}
+          {needsTimeWindow && (
             <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
               <div>
                 <label style={S.label}>From Time</label>
@@ -273,14 +318,22 @@ function ApplyLeaveModal({ onClose }) {
             </div>
           )}
 
-          {/* Approval flow info */}
+          {/* Approval flow info — elevated roles (Lead/HR/Superuser) route to Superuser */}
           <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 14px', background:'rgba(255,255,255,0.03)', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#FBBF24', flexShrink:0 }} />
-            <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>Your request goes to</span>
-            <span style={{ fontSize:'11px', fontWeight:700, color:'#FBBF24' }}>Team Lead</span>
-            <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>→ then</span>
-            <span style={{ fontSize:'11px', fontWeight:700, color:'#818CF8' }}>HR</span>
-            <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>for final approval</span>
+            <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:'#A78BFA', flexShrink:0 }} />
+            {isElevated ? (
+              <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.55)' }}>
+                Your request goes to <strong style={{ color:'#A78BFA' }}>Superuser and HR</strong> for approval
+              </span>
+            ) : (
+              <>
+                <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>Your request goes to</span>
+                <span style={{ fontSize:'11px', fontWeight:700, color:'#FBBF24' }}>Team Lead</span>
+                <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>→ then</span>
+                <span style={{ fontSize:'11px', fontWeight:700, color:'#818CF8' }}>HR</span>
+                <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>for final approval</span>
+              </>
+            )}
           </div>
 
           <div style={{ display:'flex', gap:'12px', paddingTop:'4px' }}>
@@ -311,12 +364,19 @@ function ApplyLeaveModal({ onClose }) {
 
 export default function LeavePage() {
   const [showModal, setShowModal] = useState(false);
+  const [detail, setDetail]       = useState(null);
   const [filter, setFilter]       = useState('all');
   const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['my-leaves', filter],
     queryFn:  () => leaveApi.myLeaves({ limit:50, status: filter === 'all' ? undefined : filter }),
+  });
+
+  const tc = useTableControls(data?.data || [], {
+    searchKeys: ['type', 'reason', 'status'],
+    initialSort: { key: 'created_at', dir: 'desc' },
+    pageSize: 10,
   });
 
   const cancel = useMutation({
@@ -364,25 +424,31 @@ export default function LeavePage() {
 
       {/* Table */}
       <div style={glass}>
+        <TableToolbar search={tc.search} setSearch={tc.setSearch} total={tc.total} placeholder="Search type or reason…" />
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
               <tr>
-                {['Type','Period','Duration','Reason','TL / HR Status','Remarks',''].map((h) => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
+                <SortTh label="Type" sortKey="type" sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}>Period</th>
+                <th style={S.th}>Duration</th>
+                <SortTh label="Requested" sortKey="created_at" sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="TL / HR Status" sortKey="status" sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}>Remarks</th>
+                <th style={S.th}></th>
               </tr>
             </thead>
             <tbody>
               {isLoading && (
                 <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>
               )}
-              {!isLoading && !data?.data?.length && (
+              {!isLoading && !tc.total && (
                 <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No records found</td></tr>
               )}
-              {data?.data?.map((leave) => (
+              {tc.view.map((leave) => (
                 <tr key={leave.id}
-                  style={{ transition:'background 0.12s' }}
+                  onClick={() => setDetail(leave)}
+                  style={{ transition:'background 0.12s', cursor:'pointer' }}
                   onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
                   onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                   <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>
@@ -391,8 +457,8 @@ export default function LeavePage() {
                   <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap' }}>
                     {formatDate(leave.start_date)}{leave.start_date !== leave.end_date ? ` — ${formatDate(leave.end_date)}` : ''}
                   </td>
-                  <td style={{ ...S.td, fontWeight:700, color:'#F1F5F9' }}>{leave.duration_days}d</td>
-                  <td style={{ ...S.td, maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{leave.reason}</td>
+                  <td style={{ ...S.td, fontWeight:700, color:'#F1F5F9', whiteSpace:'nowrap' }}>{leaveDurationLabel(leave)}</td>
+                  <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap', color:'rgba(241,245,249,0.45)' }}>{formatDate(leave.created_at)}</td>
                   <td style={S.td}>
                     <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
                       <Badge status={leave.status} />
@@ -404,7 +470,7 @@ export default function LeavePage() {
                   </td>
                   <td style={S.td}>
                     {leave.status === 'pending' && (
-                      <button onClick={() => cancel.mutate(leave.id)} style={{
+                      <button onClick={(e) => { e.stopPropagation(); cancel.mutate(leave.id); }} style={{
                         fontSize:'11px', fontWeight:700, color:'#F87171',
                         background:'rgba(248,113,113,0.1)', border:'1px solid rgba(248,113,113,0.25)',
                         cursor:'pointer', padding:'5px 10px', borderRadius:'7px', transition:'all 0.15s',
@@ -420,9 +486,11 @@ export default function LeavePage() {
             </tbody>
           </table>
         </div>
+        <Pagination page={tc.page} pageCount={tc.pageCount} setPage={tc.setPage} total={tc.total} pageSize={tc.pageSize} />
       </div>
 
       {showModal && <ApplyLeaveModal onClose={() => setShowModal(false)} />}
+      {detail && <LeaveWorkflowModal leave={detail} onClose={() => setDetail(null)} />}
     </div>
   );
 }

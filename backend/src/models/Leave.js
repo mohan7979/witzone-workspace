@@ -23,7 +23,7 @@ const Leave = sequelize.define('Leave', {
   type: {
     type: DataTypes.ENUM(
       'casual', 'sick', 'comp_off', 'permission', 'unpaid',
-      'marriage', 'maternity'
+      'marriage', 'maternity', 'long_leave'
     ),
     allowNull: false,
   },
@@ -32,6 +32,9 @@ const Leave = sequelize.define('Leave', {
   end_date:      { type: DataTypes.DATEONLY, allowNull: false },
   start_time:    { type: DataTypes.TIME },
   end_time:      { type: DataTypes.TIME },
+  // Half-day leave: a single date counted as 0.5 days, with the time window
+  // captured in start_time / end_time.
+  is_half_day:   { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
   duration_days: { type: DataTypes.DECIMAL(4, 1), allowNull: false },
   reason:        { type: DataTypes.TEXT, allowNull: false },
   document_note: { type: DataTypes.TEXT },          // optional note for sick leave

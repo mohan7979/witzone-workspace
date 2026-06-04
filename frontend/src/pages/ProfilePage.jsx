@@ -304,7 +304,7 @@ export default function ProfilePage() {
             {/* Leave balance pills */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 16 }}>
               {[
-                { label: 'Personal',  val: user?.casual_leave_balance,   color: '#818CF8', rgb: '129,140,248' },
+                { label: 'Claimed',   val: user?.casual_leave_balance,   color: '#818CF8', rgb: '129,140,248' },
                 { label: 'Sick',      val: user?.sick_leave_balance,     color: '#F472B6', rgb: '244,114,182' },
                 { label: 'Comp Off',  val: user?.comp_off_balance,       color: '#34D399', rgb: '52,211,153'  },
                 { label: 'Marriage',  val: user?.marriage_leave_balance, color: '#F9A8D4', rgb: '249,168,212' },

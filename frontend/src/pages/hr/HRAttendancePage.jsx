@@ -1,10 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { Calendar, Users } from 'lucide-react';
+import { Calendar } from 'lucide-react';
 import { attendanceApi, userApi } from '@/api';
 import Badge from '@/components/ui/Badge';
-import { formatTime, formatDuration } from '@/lib/utils';
+import { formatTime, formatDuration, formatHMS } from '@/lib/utils';
+import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 
 const glass   = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
 
@@ -54,6 +55,12 @@ export default function HRAttendancePage() {
 
   const isWeekend = data?.weekend === true;
   const rows = (data?.data || []).filter((row) => filter === 'all' ? true : row.status === filter);
+
+  const tc = useTableControls(rows, {
+    searchKeys: ['user.first_name', 'user.last_name', 'user.employee_id', 'user.department'],
+    initialSort: { key: 'user.first_name', dir: 'asc' },
+    pageSize: 12,
+  });
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'24px', animation:'slide-up 0.4s ease' }}>
@@ -128,26 +135,34 @@ export default function HRAttendancePage() {
       {/* Table */}
       {!isWeekend && (
         <div style={glass}>
+          <TableToolbar search={tc.search} setSearch={tc.setSearch} total={tc.total} placeholder="Search name, ID or department…" />
           <div style={{ overflowX:'auto' }}>
-            <table style={{ width:'100%', minWidth:'900px', borderCollapse:'collapse' }}>
+            <table style={{ width:'100%', minWidth:'1080px', borderCollapse:'collapse' }}>
               <thead>
                 <tr>
-                  {['Employee','Department','Clock In','Clock Out','Total Hours','Effective Hrs','Status'].map((h) => (
-                    <th key={h} style={S.th}>{h}</th>
-                  ))}
+                  <SortTh label="Employee"   sortKey="user.first_name" sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Department"  sortKey="user.department" sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Clock In"    sortKey="login_time"   sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Clock Out"   sortKey="logout_time"  sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <th style={S.th}>2nd In</th>
+                  <th style={S.th}>2nd Out</th>
+                  <SortTh label="Break"       sortKey="total_break_seconds" sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Idle"        sortKey="idle_seconds" sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Total Hrs"   sortKey="total_hours"  sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Status"      sortKey="status"       sort={tc.sort} toggleSort={tc.toggleSort} />
                 </tr>
               </thead>
               <tbody>
                 {isLoading && (
-                  <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>
+                  <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>
                 )}
-                {!isLoading && !rows.length && (
-                  <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
+                {!isLoading && !tc.total && (
+                  <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
                     No {filter === 'all' ? '' : filter} records for {date}
                   </td></tr>
                 )}
-                {rows.map((row) => (
-                  <tr key={row.id}
+                {tc.view.map((row) => (
+                  <tr key={row.id || row.user_id}
                     style={{ transition:'background 0.12s' }}
                     onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
                     onMouseLeave={e => e.currentTarget.style.background='transparent'}
@@ -166,21 +181,18 @@ export default function HRAttendancePage() {
                     <td style={S.td}><span style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'6px', padding:'3px 8px', fontSize:'12px' }}>{row.user?.department || '—'}</span></td>
                     <td style={{ ...S.td, fontWeight:600, color:'#34D399' }}>{formatTime(row.login_time)}</td>
                     <td style={{ ...S.td, color:'rgba(241,245,249,0.4)' }}>{formatTime(row.logout_time)}</td>
+                    <td style={{ ...S.td, fontWeight:600, color: row.login_time_2 ? '#34D399' : 'rgba(241,245,249,0.25)' }}>{row.login_time_2 ? formatTime(row.login_time_2) : '—'}</td>
+                    <td style={{ ...S.td, color:'rgba(241,245,249,0.4)' }}>{row.logout_time_2 ? formatTime(row.logout_time_2) : '—'}</td>
+                    <td style={{ ...S.td, color: row.total_break_seconds > 0 ? '#FBBF24' : 'rgba(241,245,249,0.3)', fontVariantNumeric:'tabular-nums' }}>{formatHMS(row.total_break_seconds || 0)}</td>
+                    <td style={{ ...S.td, color: (row.idle_seconds || 0) > 1800 ? '#F87171' : 'rgba(241,245,249,0.5)', fontVariantNumeric:'tabular-nums' }}>{row.login_time ? formatHMS(row.idle_seconds || 0) : '—'}</td>
                     <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>{formatDuration(row.total_hours)}</td>
-                    <td style={{ ...S.td, fontWeight:700, color:'#818CF8' }}>{formatDuration(row.effective_hours)}</td>
                     <td style={S.td}><Badge status={row.status} /></td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-
-          {!isLoading && rows.length > 0 && (
-            <div style={{ padding:'12px 20px', borderTop:'1px solid rgba(255,255,255,0.05)', fontSize:'12px', color:'rgba(241,245,249,0.25)', display:'flex', alignItems:'center', gap:'8px' }}>
-              <Users size={12} />
-              {rows.length} record{rows.length !== 1 ? 's' : ''}{filter !== 'all' && ` · ${filter}`}
-            </div>
-          )}
+          <Pagination page={tc.page} pageCount={tc.pageCount} setPage={tc.setPage} total={tc.total} pageSize={tc.pageSize} />
         </div>
       )}
     </div>

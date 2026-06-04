@@ -5,6 +5,7 @@ import { userApi, authApi, masterApi } from '@/api';
 import Badge from '@/components/ui/Badge';
 import MasterDataFields from '@/components/hr/MasterDataFields';
 import EmployeeDetailsModal from '@/components/hr/EmployeeDetailsModal';
+import { useTableControls, SortTh, Pagination } from '@/components/ui/TableControls';
 import toast from 'react-hot-toast';
 
 const ROLE_LABEL = { hr: 'HR Admin', lead: 'Team Lead', employee: 'Employee' };
@@ -97,8 +98,13 @@ function CreateUserModal({ onClose }) {
     employee_id:'', first_name:'', last_name:'', email:'',
     role:'employee', work_mode:'wfo', department:'', designation:'', phone:'',
     shift_id:'', manager_id:'', dob:'', doj:'',
+    // Custom leave allocation (optional — blank uses policy defaults)
+    casual_leave_balance:'', sick_leave_balance:'', comp_off_balance:'',
+    marriage_leave_balance:'', maternity_leave_balance:'', long_leave_balance:'',
   });
   const [showMaster, setShowMaster] = useState(false);
+  const [showLeaves, setShowLeaves] = useState(false);
+  const isMarried = form.marital_status === 'married';
 
   const fv = (k) => (e) => {
     const val = e.target.value;
@@ -255,6 +261,43 @@ function CreateUserModal({ onClose }) {
             )}
           </div>
 
+          {/* Custom leave allocation — for mid-year joiners HR can set exact counts */}
+          <div style={{ borderTop:'1px solid rgba(255,255,255,0.07)', paddingTop:'16px' }}>
+            <button type="button" onClick={() => setShowLeaves(s => !s)} style={{
+              display:'flex', alignItems:'center', gap:'8px', background:'none', border:'none', cursor:'pointer', padding:0,
+              fontSize:'12px', fontWeight:700, color:'#34D399', textTransform:'uppercase', letterSpacing:'1px',
+            }}>
+              {showLeaves ? '▾' : '▸'} Leave Allocation (optional)
+            </button>
+            {showLeaves && (
+              <div style={{ marginTop:'14px' }}>
+                <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)', marginBottom:'12px' }}>
+                  Leave blank to use the standard policy. Set custom counts for mid-year joiners who can't avail the full-year quota.
+                </p>
+                <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
+                  {[
+                    ['casual_leave_balance', `Claimed Leave (default ${form.work_mode === 'wfh' ? 8 : 12})`],
+                    ['sick_leave_balance',   'Sick Leave (default 12)'],
+                    ['comp_off_balance',     'Comp Off (default 0)'],
+                    ['long_leave_balance',   'Long Leave (default 0)'],
+                    ['marriage_leave_balance','Marriage Leave (default 5)'],
+                    ...(isMarried ? [['maternity_leave_balance', 'Maternity Leave (default 90)']] : []),
+                  ].map(([k, label]) => (
+                    <div key={k}>
+                      <label style={S.label}>{label}</label>
+                      <input type="number" min="0" step="0.5" placeholder="default" value={form[k]} onChange={fv(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+                    </div>
+                  ))}
+                </div>
+                {!isMarried && (
+                  <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', marginTop:'10px' }}>
+                    Maternity leave applies to married employees only — set Marital Status to “Married” in Personal Details to allocate it.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+
           <div style={{ display:'flex', gap:'12px', paddingTop:'4px' }}>
             <button type="button" onClick={onClose} style={{
               flex:1, padding:'12px', fontSize:'13px', fontWeight:600,
@@ -388,6 +431,9 @@ export default function EmployeesPage() {
   });
   const leadsMap = Object.fromEntries((leadsData?.data || []).map(l => [l.id, `${l.first_name} ${l.last_name}`]));
 
+  // Sorting + pagination (search is handled server-side by the box above).
+  const tc = useTableControls(data?.data || [], { initialSort: { key: 'first_name', dir: 'asc' }, pageSize: 12 });
+
   const resetPassword = useMutation({ mutationFn:authApi.resetPassword, onSuccess:() => toast.success('Password reset. Credentials sent via email.'), onError:(e) => toast.error(e.message) });
   const terminate     = useMutation({ mutationFn:userApi.terminate,     onSuccess:() => { toast.success('Employee terminated.');  qc.invalidateQueries(['users']); qc.invalidateQueries(['dashboard-stats']); }, onError:(e) => toast.error(e.message) });
   const reactivate    = useMutation({ mutationFn:userApi.reactivate,    onSuccess:() => { toast.success('Employee reactivated.'); qc.invalidateQueries(['users']); qc.invalidateQueries(['dashboard-stats']); }, onError:(e) => toast.error(e.message) });
@@ -449,15 +495,20 @@ export default function EmployeesPage() {
           <table style={{ width:'100%', minWidth:'1000px', borderCollapse:'collapse' }}>
             <thead>
               <tr>
-                {['Employee','ID','Department','Role','Team Lead','Mode','Status','Actions'].map((h) => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
+                <SortTh label="Employee"   sortKey="first_name"  sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="ID"         sortKey="employee_id" sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="Department"  sortKey="department"  sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="Role"        sortKey="role"        sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}>Team Lead</th>
+                <th style={S.th}>Mode</th>
+                <SortTh label="Status"      sortKey="status"      sort={tc.sort} toggleSort={tc.toggleSort} />
+                <th style={S.th}>Actions</th>
               </tr>
             </thead>
             <tbody>
               {isLoading && <tr><td colSpan={8} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
-              {!isLoading && !data?.data?.length && <tr><td colSpan={8} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No employees found</td></tr>}
-              {data?.data?.map((user) => {
+              {!isLoading && !tc.total && <tr><td colSpan={8} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No employees found</td></tr>}
+              {tc.view.map((user) => {
                 const leadName = user.manager_id ? (leadsMap[user.manager_id] || '—') : null;
                 return (
                   <tr key={user.id}
@@ -596,6 +647,7 @@ export default function EmployeesPage() {
             </tbody>
           </table>
         </div>
+        <Pagination page={tc.page} pageCount={tc.pageCount} setPage={tc.setPage} total={tc.total} pageSize={tc.pageSize} />
       </div>
 
       {showCreate  && <CreateUserModal onClose={() => setShowCreate(false)} />}

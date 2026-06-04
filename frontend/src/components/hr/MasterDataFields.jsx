@@ -61,6 +61,7 @@ export default function MasterDataFields({ form, onField, readOnly = false }) {
           { value:'', label:'— Select —' }, { value:'single', label:'Single' }, { value:'married', label:'Married' },
         ] })}
         {isMarried && f('Spouse Name', 'spouse_name')}
+        {isMarried && f('Spouse Contact Number', 'spouse_mobile')}
       </Section>
 
       <Section title="Contact Information">
