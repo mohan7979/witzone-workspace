@@ -15,11 +15,15 @@ const Leave = sequelize.define('Leave', {
   tl_status:      { type: DataTypes.ENUM('approved', 'rejected'), allowNull: true },
   tl_comment:     { type: DataTypes.TEXT },
   tl_reviewed_at: { type: DataTypes.DATE },
+  // True when the employee has no assigned TL, so the TL stage is bypassed and
+  // the request goes straight to HR. Kept separate from tl_status so the UI never
+  // shows a false "TL Approved" for a review that never happened.
+  tl_skipped:     { type: DataTypes.BOOLEAN, allowNull: false, defaultValue: false },
 
   type: {
     type: DataTypes.ENUM(
       'casual', 'sick', 'comp_off', 'permission', 'unpaid',
-      'wfh', 'wfo', 'marriage', 'maternity'
+      'marriage', 'maternity'
     ),
     allowNull: false,
   },
@@ -30,7 +34,8 @@ const Leave = sequelize.define('Leave', {
   end_time:      { type: DataTypes.TIME },
   duration_days: { type: DataTypes.DECIMAL(4, 1), allowNull: false },
   reason:        { type: DataTypes.TEXT, allowNull: false },
-  document_note: { type: DataTypes.TEXT },   // for sick leave
+  document_note: { type: DataTypes.TEXT },          // optional note for sick leave
+  document_file: { type: DataTypes.STRING(255) },   // uploaded medical certificate filename
 
   status: {
     type: DataTypes.ENUM('pending', 'approved', 'rejected', 'cancelled'),

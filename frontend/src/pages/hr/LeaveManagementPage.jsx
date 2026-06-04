@@ -3,8 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, X, GitBranch } from 'lucide-react';
 import { leaveApi } from '@/api';
 import useAuthStore from '@/store/authStore';
-import Badge from '@/components/ui/Badge';
-import { formatDate } from '@/lib/utils';
+import { formatDate, leaveStage } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 const glass = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -17,12 +16,16 @@ const S = {
 };
 
 const TYPE_LABELS = {
-  casual:'Casual', sick:'Sick', comp_off:'Comp Off', permission:'Permission',
-  unpaid:'Unpaid', wfh:'WFH', wfo:'WFO', marriage:'Marriage', maternity:'Maternity',
+  casual:'Personal', sick:'Sick', comp_off:'Comp Off', permission:'Permission',
+  unpaid:'Unpaid', marriage:'Marriage', maternity:'Maternity',
 };
 
-function TlStatusBadge({ status }) {
-  if (!status) return <span style={{ color:'rgba(241,245,249,0.25)', fontSize:'11px' }}>Pending TL</span>;
+function TlStatusBadge({ status, skipped }) {
+  // No TL assigned — request bypasses Level 1 and goes straight to HR. We must NOT
+  // render this as "TL approved": no TL ever reviewed it.
+  if (skipped && !status)
+    return <span style={{ fontSize:'11px', fontWeight:600, padding:'3px 8px', borderRadius:'6px', background:'rgba(148,163,184,0.12)', color:'rgba(203,213,225,0.8)', border:'1px solid rgba(148,163,184,0.25)' }}>No TL · Direct to HR</span>;
+  if (!status) return <span style={{ color:'rgba(251,191,36,0.85)', fontSize:'11px', fontWeight:600 }}>Pending TL Approval</span>;
   const styles = {
     approved: { bg:'rgba(16,185,129,0.12)', color:'#34D399', border:'rgba(16,185,129,0.3)' },
     rejected: { bg:'rgba(239,68,68,0.12)',  color:'#F87171', border:'rgba(239,68,68,0.3)' },
@@ -35,10 +38,27 @@ function TlStatusBadge({ status }) {
   );
 }
 
+function StageBadge({ leave }) {
+  const { label, kind } = leaveStage(leave);
+  const styles = {
+    approved:  { bg:'rgba(16,185,129,0.12)', color:'#34D399', border:'rgba(16,185,129,0.3)' },
+    rejected:  { bg:'rgba(239,68,68,0.12)',  color:'#F87171', border:'rgba(239,68,68,0.3)' },
+    cancelled: { bg:'rgba(148,163,184,0.12)',color:'rgba(203,213,225,0.7)', border:'rgba(148,163,184,0.25)' },
+    pending:   { bg:'rgba(251,191,36,0.12)', color:'#FBBF24', border:'rgba(251,191,36,0.3)' },
+  };
+  const s = styles[kind] || styles.pending;
+  return (
+    <span style={{ fontSize:'11px', fontWeight:700, padding:'4px 10px', borderRadius:'6px', background:s.bg, color:s.color, border:`1px solid ${s.border}`, whiteSpace:'nowrap' }}>
+      {label}
+    </span>
+  );
+}
+
 function ReviewModal({ leave, role, onClose }) {
   const qc = useQueryClient();
   const [comment, setComment] = useState('');
   const isTL = role === 'lead';
+  const isSuper = role === 'superuser';
 
   const reviewFn = isTL
     ? ({ action }) => leaveApi.tlReview(leave.id, { action, comment })
@@ -81,10 +101,10 @@ function ReviewModal({ leave, role, onClose }) {
             </div>
             <div>
               <p style={{ fontSize:'15px', fontWeight:700, color:'#F1F5F9' }}>
-                {isTL ? 'Team Lead Review' : 'HR Final Review'}
+                {isTL ? 'Team Lead Review' : isSuper ? 'Superuser Review' : 'HR Final Review'}
               </p>
               <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>
-                {isTL ? 'Level 1 — Approve to forward to HR' : 'Level 2 — Final decision'}
+                {isTL ? 'Level 1 — Approve to forward to HR' : isSuper ? 'Final authority — TL & HR requests' : 'Level 2 — Final decision'}
               </p>
             </div>
           </div>
@@ -107,9 +127,9 @@ function ReviewModal({ leave, role, onClose }) {
 
           {/* Approval chain visual */}
           <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 14px', background:'rgba(255,255,255,0.03)', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color: isTL ? '#FBBF24' : 'rgba(16,185,129,0.9)' }}>
-              <div style={{ width:'8px', height:'8px', borderRadius:'50%', background: isTL ? '#FBBF24' : '#10B981' }} />
-              TL Review {isTL ? '← You are here' : '✓ Done'}
+            <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color: isTL ? '#FBBF24' : (leave.tl_skipped ? 'rgba(203,213,225,0.7)' : 'rgba(16,185,129,0.9)') }}>
+              <div style={{ width:'8px', height:'8px', borderRadius:'50%', background: isTL ? '#FBBF24' : (leave.tl_skipped ? 'rgba(148,163,184,0.6)' : '#10B981') }} />
+              TL Review {isTL ? '← You are here' : (leave.tl_skipped ? '— skipped (no TL)' : '✓ Done')}
             </div>
             <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
             <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color: isTL ? 'rgba(241,245,249,0.25)' : '#818CF8' }}>
@@ -160,8 +180,10 @@ function ReviewModal({ leave, role, onClose }) {
 
 export default function LeaveManagementPage() {
   const { user } = useAuthStore();
-  const isHR   = user?.role === 'hr';
-  const isLead = user?.role === 'lead';
+  const isHR    = user?.role === 'hr';
+  const isLead  = user?.role === 'lead';
+  const isSuper = user?.role === 'superuser';
+  const isHRLevel = isHR || isSuper;   // Level-2 final reviewers
 
   const [selected, setSelected] = useState(null);
   const [filter,   setFilter]   = useState('pending');
@@ -175,16 +197,19 @@ export default function LeaveManagementPage() {
     queryFn:  () => leaveApi.pending({ status: filter, limit: 100 }),
   });
 
-  const pageTitle = isLead ? 'Team Leave Requests' : 'Leave Management';
+  const pageTitle = isLead ? 'Team Leave Requests' : isSuper ? 'Leave Approvals — TL & HR' : 'Leave Management';
   const pageDesc  = isLead
     ? 'Review and approve leave requests from your team'
-    : 'Final approval for TL-reviewed leave requests';
+    : isSuper
+      ? 'Approve or reject leave & permission requests submitted by Team Leads and HR'
+      : 'Final approval for TL-reviewed employee leave requests';
 
-  // Can review: Lead sees tl_status=null pending, HR sees tl_status=approved pending
+  // Can review: Lead acts only on its own queue (tl_status still null, not skipped);
+  // HR / Superuser act once the TL has approved OR there was no TL (tl_skipped).
   const canReview = (leave) => {
     if (leave.status !== 'pending') return false;
-    if (isLead) return leave.tl_status === null;
-    if (isHR)   return leave.tl_status === 'approved';
+    if (isLead)    return leave.tl_status === null && !leave.tl_skipped;
+    if (isHRLevel) return leave.tl_status === 'approved' || leave.tl_skipped;
     return false;
   };
 
@@ -200,9 +225,9 @@ export default function LeaveManagementPage() {
         </div>
         {/* Approval level indicator */}
         <div style={{ display:'flex', flexDirection:'column', gap:'6px', alignItems:'flex-end' }}>
-          <div style={{ display:'flex', alignItems:'center', gap:'6px', background: isLead ? 'rgba(251,191,36,0.12)' : 'rgba(129,140,248,0.08)', border:`1px solid ${isLead ? 'rgba(251,191,36,0.3)' : 'rgba(129,140,248,0.2)'}`, borderRadius:'20px', padding:'6px 14px', fontSize:'12px', fontWeight:600, color: isLead ? '#FBBF24' : '#818CF8' }}>
-            <div style={{ width:'6px', height:'6px', background: isLead ? '#FBBF24' : '#818CF8', borderRadius:'50%' }} />
-            {isLead ? 'Level 1 — TL Review' : 'Level 2 — HR Final'}
+          <div style={{ display:'flex', alignItems:'center', gap:'6px', background: isLead ? 'rgba(251,191,36,0.12)' : isSuper ? 'rgba(244,114,182,0.12)' : 'rgba(129,140,248,0.08)', border:`1px solid ${isLead ? 'rgba(251,191,36,0.3)' : isSuper ? 'rgba(244,114,182,0.3)' : 'rgba(129,140,248,0.2)'}`, borderRadius:'20px', padding:'6px 14px', fontSize:'12px', fontWeight:600, color: isLead ? '#FBBF24' : isSuper ? '#F472B6' : '#818CF8' }}>
+            <div style={{ width:'6px', height:'6px', background: isLead ? '#FBBF24' : isSuper ? '#F472B6' : '#818CF8', borderRadius:'50%' }} />
+            {isLead ? 'Level 1 — TL Review' : isSuper ? 'Superuser — Final Authority' : 'Level 2 — HR Final'}
           </div>
         </div>
       </div>
@@ -226,7 +251,7 @@ export default function LeaveManagementPage() {
           <table style={{ width:'100%', minWidth:'900px', borderCollapse:'collapse' }}>
             <thead>
               <tr>
-                {['Employee','Type','Period','Days','Reason','Applied','TL Status', isHR ? 'TL Reviewer' : null,'Final Status',''].filter(Boolean).map((h) => (
+                {['Employee','Type','Period','Days','Reason','Applied','TL Status', isHRLevel ? 'TL Reviewer' : null,'Current Status',''].filter(Boolean).map((h) => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
               </tr>
@@ -271,10 +296,10 @@ export default function LeaveManagementPage() {
                   </td>
 
                   {/* TL Status */}
-                  <td style={S.td}><TlStatusBadge status={leave.tl_status} /></td>
+                  <td style={S.td}><TlStatusBadge status={leave.tl_status} skipped={leave.tl_skipped} /></td>
 
-                  {/* TL Reviewer name (HR view only) */}
-                  {isHR && (
+                  {/* TL Reviewer name (HR / Superuser view) */}
+                  {isHRLevel && (
                     <td style={{ ...S.td, fontSize:'12px' }}>
                       {leave.tlReviewer
                         ? <span style={{ color:'#F1F5F9', fontWeight:600 }}>{leave.tlReviewer.first_name} {leave.tlReviewer.last_name}</span>
@@ -282,8 +307,8 @@ export default function LeaveManagementPage() {
                     </td>
                   )}
 
-                  {/* Final status */}
-                  <td style={S.td}><Badge status={leave.status} /></td>
+                  {/* Current stage — never shows TL approval before it happened */}
+                  <td style={S.td}><StageBadge leave={leave} /></td>
 
                   <td style={S.td}>
                     {canReview(leave) && (
@@ -296,7 +321,7 @@ export default function LeaveManagementPage() {
                       }}
                         onMouseEnter={e => { e.currentTarget.style.opacity='0.85'; e.currentTarget.style.transform='translateY(-1px)'; }}
                         onMouseLeave={e => { e.currentTarget.style.opacity='1'; e.currentTarget.style.transform='none'; }}>
-                        {isLead ? 'TL Review' : 'HR Review'}
+                        {isLead ? 'TL Review' : isSuper ? 'Review' : 'HR Review'}
                       </button>
                     )}
                   </td>

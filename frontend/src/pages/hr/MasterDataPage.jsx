@@ -330,42 +330,64 @@ function ShiftsPanel({ tab }) {
         </button>
       </div>
       <table style={{ width:'100%', borderCollapse:'collapse' }}>
-        <thead><tr><th style={S.th}>Shift Name</th><th style={S.th}>Start Time</th><th style={S.th}>End Time</th><th style={S.th}>Duration</th><th style={S.th}>Status</th><th style={S.th}>Actions</th></tr></thead>
+        <thead><tr>
+          <th style={S.th}>Shift Name</th>
+          <th style={S.th}>Type</th>
+          <th style={S.th}>Start (IST)</th>
+          <th style={S.th}>End (IST)</th>
+          <th style={S.th}>Duration</th>
+          <th style={S.th}>Status</th>
+          <th style={S.th}>Actions</th>
+        </tr></thead>
         <tbody>
           {adding && (
             <EditableRow
               fields={[
                 { key:'name', placeholder:'e.g. Morning Shift' },
+                { key:'shift_type', type:'select', value:'day', options:[{value:'day',label:'☀️ Day'},{value:'night',label:'🌙 Night'}] },
                 { key:'start_time', type:'time' },
                 { key:'end_time', type:'time' },
                 { key:'is_active', type:'select', value:'true', options:[{value:'true',label:'Active'},{value:'false',label:'Inactive'}] },
               ]}
-              onSave={(v) => create.mutate({ name:v.name, start_time:v.start_time, end_time:v.end_time, is_active: v.is_active !== 'false' })}
+              onSave={(v) => create.mutate({ name:v.name, shift_type:v.shift_type, start_time:v.start_time, end_time:v.end_time, is_active: v.is_active !== 'false' })}
               onCancel={() => setAdding(false)} />
           )}
           {rows.map(r => {
             const [sh, sm] = r.start_time.split(':').map(Number);
             const [eh, em] = r.end_time.split(':').map(Number);
             let mins = (eh * 60 + em) - (sh * 60 + sm);
-            if (mins < 0) mins += 24 * 60;
-            const dur = `${Math.floor(mins/60)}h ${mins%60>0?`${mins%60}m`:''}`;
+            if (mins < 0) mins += 24 * 60; // crosses midnight
+            const dur = `${Math.floor(mins/60)}h${mins%60>0?` ${mins%60}m`:''}`;
+            const isNight = r.shift_type === 'night';
             return editing === r.id ? (
               <EditableRow key={r.id}
                 fields={[
                   { key:'name', value:r.name, placeholder:'Shift name' },
+                  { key:'shift_type', type:'select', value:r.shift_type||'day', options:[{value:'day',label:'☀️ Day'},{value:'night',label:'🌙 Night'}] },
                   { key:'start_time', value:r.start_time?.slice(0,5), type:'time' },
                   { key:'end_time', value:r.end_time?.slice(0,5), type:'time' },
                   { key:'is_active', type:'select', value:String(r.is_active), options:[{value:'true',label:'Active'},{value:'false',label:'Inactive'}] },
                 ]}
-                onSave={(v) => update.mutate({ id:r.id, data:{ name:v.name, start_time:v.start_time, end_time:v.end_time, is_active: v.is_active !== 'false' } })}
+                onSave={(v) => update.mutate({ id:r.id, data:{ name:v.name, shift_type:v.shift_type, start_time:v.start_time, end_time:v.end_time, is_active: v.is_active !== 'false' } })}
                 onCancel={() => setEditing(null)} />
             ) : (
               <tr key={r.id} style={{ transition:'background 0.12s' }}
                 onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
                 onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                 <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>{r.name}</td>
+                <td style={S.td}>
+                  <span style={{ display:'inline-flex', alignItems:'center', gap:'4px', padding:'3px 8px', borderRadius:'6px', fontSize:'11px', fontWeight:700,
+                    background: isNight ? 'rgba(139,92,246,0.15)' : 'rgba(251,191,36,0.12)',
+                    color:      isNight ? '#A78BFA' : '#FBBF24',
+                    border:     `1px solid ${isNight ? 'rgba(139,92,246,0.3)' : 'rgba(251,191,36,0.25)'}` }}>
+                    {isNight ? '🌙 Night' : '☀️ Day'}
+                  </span>
+                </td>
                 <td style={{ ...S.td, fontWeight:600, color:'#34D399' }}>{r.start_time?.slice(0,5)}</td>
-                <td style={{ ...S.td, color:'rgba(241,245,249,0.5)' }}>{r.end_time?.slice(0,5)}</td>
+                <td style={{ ...S.td, color:'rgba(241,245,249,0.6)' }}>
+                  {r.end_time?.slice(0,5)}
+                  {r.crosses_midnight && <span style={{ marginLeft:4, fontSize:10, color:'#A78BFA' }}>+1</span>}
+                </td>
                 <td style={{ ...S.td, color:'#FBBF24', fontWeight:600 }}>{dur}</td>
                 <td style={S.td}>
                   <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'3px 9px', borderRadius:'6px', fontSize:'11px', fontWeight:700, background: r.is_active ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.15)', color: r.is_active ? '#34D399' : '#F87171', border:`1px solid ${r.is_active ? 'rgba(52,211,153,0.3)' : 'rgba(248,113,113,0.3)'}` }}>
@@ -386,7 +408,7 @@ function ShiftsPanel({ tab }) {
               </tr>
             );
           })}
-          {!rows.length && !adding && <tr><td colSpan={6} style={{ padding:'40px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No shift templates yet.</td></tr>}
+          {!rows.length && !adding && <tr><td colSpan={7} style={{ padding:'40px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No shift templates yet.</td></tr>}
         </tbody>
       </table>
     </div>

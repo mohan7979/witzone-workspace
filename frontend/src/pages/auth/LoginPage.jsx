@@ -4,6 +4,8 @@ import { Eye, EyeOff, Zap, ArrowRight } from 'lucide-react';
 import { authApi } from '@/api';
 import useAuthStore from '@/store/authStore';
 import toast from 'react-hot-toast';
+import { useMsal } from '@azure/msal-react';
+import { loginRequest, isSSOEnabled } from '@/auth/msalConfig';
 
 const FEATURES = [
   { icon: '⚡', title: 'Smart Clock-in',      sub: 'Accurate attendance tracking with idle detection' },
@@ -11,6 +13,71 @@ const FEATURES = [
   { icon: '📊', title: 'Live Analytics',      sub: 'Workforce insights at your fingertips'           },
   { icon: '🔒', title: 'Secure & Private',    sub: 'Enterprise-grade data protection'                },
 ];
+
+/* Microsoft logo SVG */
+function MicrosoftLogo() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 21 21" xmlns="http://www.w3.org/2000/svg">
+      <rect x="1" y="1" width="9" height="9" fill="#f25022"/>
+      <rect x="11" y="1" width="9" height="9" fill="#7fba00"/>
+      <rect x="1" y="11" width="9" height="9" fill="#00a4ef"/>
+      <rect x="11" y="11" width="9" height="9" fill="#ffb900"/>
+    </svg>
+  );
+}
+
+/* SSO button — separate component so useMsal hook is always called consistently */
+function MicrosoftSSOButton({ onSuccess }) {
+  const { instance } = useMsal();
+  const [loading, setLoading] = useState(false);
+
+  const handleClick = async () => {
+    setLoading(true);
+    try {
+      const result = await instance.loginPopup(loginRequest);
+      onSuccess(result.idToken);
+    } catch (err) {
+      if (err?.errorCode !== 'user_cancelled') {
+        toast.error(err.message || 'Microsoft sign-in failed');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div style={{ marginBottom:'20px' }}>
+      <button
+        type="button"
+        onClick={handleClick}
+        disabled={loading}
+        style={{
+          width:'100%', padding:'12px 16px',
+          background: loading ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)',
+          border:'1.5px solid rgba(255,255,255,0.12)',
+          borderRadius:'10px', color:'#F1F5F9',
+          fontSize:'14px', fontWeight:600,
+          cursor: loading ? 'not-allowed' : 'pointer',
+          display:'flex', alignItems:'center', justifyContent:'center', gap:'10px',
+          transition:'all 0.2s',
+        }}
+        onMouseEnter={e => { if (!loading) e.currentTarget.style.background='rgba(255,255,255,0.1)'; }}
+        onMouseLeave={e => { e.currentTarget.style.background = loading ? 'rgba(255,255,255,0.03)' : 'rgba(255,255,255,0.06)'; }}
+      >
+        {loading
+          ? <><span style={{ width:'16px', height:'16px', border:'2px solid rgba(255,255,255,0.3)', borderTopColor:'white', borderRadius:'50%', display:'inline-block', animation:'spin 0.7s linear infinite' }} /> Signing in with Microsoft…</>
+          : <><MicrosoftLogo /> Sign in with Microsoft</>
+        }
+      </button>
+
+      <div style={{ display:'flex', alignItems:'center', gap:'12px', margin:'18px 0 0' }}>
+        <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
+        <span style={{ color:'rgba(241,245,249,0.25)', fontSize:'12px', whiteSpace:'nowrap' }}>or sign in with password</span>
+        <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
+      </div>
+    </div>
+  );
+}
 
 export default function LoginPage() {
   const [form, setForm]         = useState({ email:'', password:'' });
@@ -31,6 +98,16 @@ export default function LoginPage() {
       toast.error(err.message || 'Invalid credentials');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleSSOSuccess = async (idToken) => {
+    try {
+      const { token, user } = await authApi.ssoLogin(idToken);
+      setAuth(user, token);
+      navigate('/dashboard');
+    } catch (err) {
+      toast.error(err.message || 'SSO login failed');
     }
   };
 
@@ -147,6 +224,9 @@ export default function LoginPage() {
               </h2>
               <p style={{ fontSize:'14px', color:'rgba(241,245,249,0.4)' }}>Sign in to your HR portal account</p>
             </div>
+
+            {/* Microsoft SSO button — shown only when env vars are configured */}
+            {isSSOEnabled && <MicrosoftSSOButton onSuccess={handleSSOSuccess} />}
 
             <form onSubmit={handleSubmit} style={{ display:'flex', flexDirection:'column', gap:'18px' }}>
               <div>

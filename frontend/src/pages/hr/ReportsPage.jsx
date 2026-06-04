@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Download, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { Download, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
 import { reportApi, userApi } from '@/api';
 import Badge from '@/components/ui/Badge';
-import { formatDate, formatDuration, formatIdleTime } from '@/lib/utils';
+import { formatDate, formatTime, formatDuration, formatIdleTime, formatHMS } from '@/lib/utils';
+import toast from 'react-hot-toast';
 
 const glass = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
 
@@ -18,6 +19,7 @@ const S = {
 };
 
 const TABS = [
+  { key:'activity',   label:'Activity Log', color:'#34D399' },
   { key:'attendance', label:'Attendance', color:'#818CF8' },
   { key:'leaves',     label:'Leaves',     color:'#F472B6' },
   { key:'idle',       label:'Idle Time',  color:'#A78BFA' },
@@ -33,6 +35,29 @@ function downloadCSV(data, filename) {
   a.click();
 }
 
+// Trigger a browser download from a server-generated file Blob (xlsx/pdf/csv).
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+// Render a single break in/out pair list compactly for the table cell.
+function BreaksCell({ breaks }) {
+  if (!breaks?.length) return <span style={{ color:'rgba(241,245,249,0.25)' }}>—</span>;
+  return (
+    <div style={{ display:'flex', flexDirection:'column', gap:'2px' }}>
+      {breaks.map((b, i) => (
+        <span key={i} style={{ fontSize:'11px', color:'rgba(241,245,249,0.55)', whiteSpace:'nowrap' }}>
+          {formatTime(b.in)} → {b.out ? formatTime(b.out) : <span style={{ color:'#FBBF24' }}>ongoing</span>}
+          <span style={{ color:'rgba(241,245,249,0.3)' }}> ({formatHMS(b.duration_seconds)})</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 const LEAVE_TYPES  = ['casual','sick','comp_off','permission','unpaid'];
 const LEAVE_STATUS = ['pending','approved','rejected','cancelled'];
 
@@ -46,12 +71,26 @@ const selectStyle = {
   transition:'all 0.2s',
 };
 
+// Compute a [start, end] ISO date range for the Daily / Weekly / Monthly views.
+function rangeForView(view) {
+  const d = new Date();
+  const iso = (x) => x.toISOString().split('T')[0];
+  if (view === 'daily')   return { start: iso(d), end: iso(d) };
+  if (view === 'weekly')  { const s = new Date(d); s.setDate(d.getDate() - 6); return { start: iso(s), end: iso(d) }; }
+  // monthly
+  return { start: iso(new Date(d.getFullYear(), d.getMonth(), 1)), end: iso(d) };
+}
+
 export default function ReportsPage() {
-  const [tab, setTab]       = useState('attendance');
+  const [tab, setTab]       = useState('activity');
   const [range, setRange]   = useState({ start:new Date(new Date().setDate(1)).toISOString().split('T')[0], end:new Date().toISOString().split('T')[0] });
   const [filters, setFilters] = useState({ department:'', employee:'', leaveType:'', leaveStatus:'', riskLevel:'' });
+  const [view, setView]     = useState('monthly');   // activity tab: daily | weekly | monthly
+  const [exporting, setExporting] = useState(false);
 
   const setFilter = (key, val) => setFilters(f => ({ ...f, [key]:val }));
+
+  const applyView = (v) => { setView(v); setRange(rangeForView(v)); };
 
   const { data:deptData }  = useQuery({ queryKey:['departments'], queryFn:userApi.departments, staleTime:5*60*1000 });
   const departments        = deptData?.departments || [];
@@ -62,11 +101,28 @@ export default function ReportsPage() {
   const leaveParams = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }), ...(filters.leaveType && { type:filters.leaveType }), ...(filters.leaveStatus && { status:filters.leaveStatus }) };
   const idleParams  = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }) };
 
+  const activityParams = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }) };
+
   const attReport   = useQuery({ queryKey:['report-attendance', attParams],  queryFn:() => reportApi.attendance(attParams),  enabled:tab==='attendance' });
   const leaveReport = useQuery({ queryKey:['report-leaves', leaveParams],    queryFn:() => reportApi.leaves(leaveParams),    enabled:tab==='leaves'     });
   const idleReport  = useQuery({ queryKey:['report-idle', idleParams],       queryFn:() => reportApi.idle(idleParams),       enabled:tab==='idle'       });
+  const activity    = useQuery({ queryKey:['report-activity', activityParams], queryFn:() => reportApi.activity(activityParams), enabled:tab==='activity' });
 
   const activeTab = TABS.find(t => t.key === tab);
+
+  // Server-side export for the activity report (csv | xlsx | pdf).
+  const exportActivity = async (format) => {
+    try {
+      setExporting(true);
+      const blob = await reportApi.activityExport({ ...activityParams, format });
+      const ext = format === 'xlsx' ? 'xlsx' : format;
+      downloadBlob(blob, `activity_${range.start}_to_${range.end}.${ext}`);
+    } catch (e) {
+      toast.error(e.response?.data?.message || e.message || 'Export failed');
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const ExportBtn = ({ onClick }) => (
     <button onClick={onClick} style={{
@@ -171,6 +227,72 @@ export default function ReportsPage() {
           </>
         )}
       </div>
+
+      {/* Activity Log Report — full per-record attendance activity */}
+      {tab === 'activity' && (
+        <div style={{ display:'flex', flexDirection:'column', gap:'16px' }}>
+          <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', flexWrap:'wrap', gap:'10px' }}>
+            {/* Daily / Weekly / Monthly view selector */}
+            <div style={{ display:'flex', gap:'3px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:'10px', padding:'3px' }}>
+              {['daily','weekly','monthly'].map((v) => (
+                <button key={v} onClick={() => applyView(v)} style={{
+                  padding:'6px 16px', fontSize:'12px', fontWeight:600, borderRadius:'8px', border:'none', cursor:'pointer',
+                  textTransform:'capitalize', transition:'all 0.15s',
+                  background: view === v ? 'rgba(52,211,153,0.15)' : 'transparent',
+                  color: view === v ? '#34D399' : 'rgba(241,245,249,0.4)',
+                  boxShadow: view === v ? '0 0 0 1px rgba(52,211,153,0.4)' : 'none',
+                }}>{v}</button>
+              ))}
+            </div>
+            {/* Export buttons */}
+            <div style={{ display:'flex', gap:'8px' }}>
+              {[
+                { fmt:'csv',  label:'CSV',   icon:<Download size={13} />,        grad:'linear-gradient(135deg,#10B981,#34D399)' },
+                { fmt:'xlsx', label:'Excel', icon:<FileSpreadsheet size={13} />, grad:'linear-gradient(135deg,#6366F1,#8B5CF6)' },
+                { fmt:'pdf',  label:'PDF',   icon:<FileText size={13} />,        grad:'linear-gradient(135deg,#EF4444,#F87171)' },
+              ].map(({ fmt, label, icon, grad }) => (
+                <button key={fmt} disabled={exporting} onClick={() => exportActivity(fmt)} style={{
+                  display:'inline-flex', alignItems:'center', gap:'6px',
+                  padding:'9px 16px', fontSize:'12px', fontWeight:700,
+                  background: grad, color:'white', border:'none', borderRadius:'10px',
+                  cursor: exporting ? 'not-allowed' : 'pointer', opacity: exporting ? 0.6 : 1, transition:'all 0.2s',
+                }}>
+                  {icon} {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div style={glass}>
+            <div style={{ overflowX:'auto' }}>
+              <table style={{ width:'100%', minWidth:'1100px', borderCollapse:'collapse' }}>
+                <thead><tr>{['Date','Employee','Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time','Status'].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+                <tbody>
+                  {activity.isLoading && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
+                  {!activity.isLoading && !activity.data?.data?.length && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
+                  {activity.data?.data?.map((row, i) => (
+                    <tr key={i} style={{ transition:'background 0.12s' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
+                      <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap' }}>{formatDate(row.date)}</td>
+                      <td style={S.td}>
+                        <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{row.name}</p>
+                        <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)' }}>{row.employee_id}{row.department ? ` · ${row.department}` : ''}</p>
+                      </td>
+                      <td style={{ ...S.td, color:'#34D399', whiteSpace:'nowrap' }}>{formatTime(row.clock_in)}</td>
+                      <td style={{ ...S.td, color:'rgba(241,245,249,0.5)', whiteSpace:'nowrap' }}>{formatTime(row.clock_out)}</td>
+                      <td style={{ ...S.td, color:'#34D399', whiteSpace:'nowrap' }}>{formatTime(row.clock_in_2)}</td>
+                      <td style={{ ...S.td, color:'rgba(241,245,249,0.5)', whiteSpace:'nowrap' }}>{formatTime(row.clock_out_2)}</td>
+                      <td style={S.td}><BreaksCell breaks={row.breaks} /></td>
+                      <td style={{ ...S.td, fontWeight:700, color:'#FBBF24', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{formatHMS(row.total_break_seconds)}</td>
+                      <td style={{ ...S.td, fontWeight:700, color: (row.idle_seconds||0) > 1800 ? '#F87171' : 'rgba(241,245,249,0.5)', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{formatHMS(row.idle_seconds)}</td>
+                      <td style={S.td}><Badge status={row.status} /></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Attendance Report */}
       {tab === 'attendance' && (

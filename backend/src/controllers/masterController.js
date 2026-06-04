@@ -103,17 +103,32 @@ exports.listShifts = asyncHandler(async (req, res) => {
   res.json({ data: rows });
 });
 
+/* Auto-detect if a shift crosses midnight (e.g. 22:00 → 06:00) */
+function detectCrossesMidnight(start_time, end_time) {
+  return start_time > end_time; // "22:00" > "06:00" is true
+}
+
 exports.createShift = asyncHandler(async (req, res) => {
-  const { name, start_time, end_time } = req.body;
+  const { name, shift_type = 'day', start_time, end_time } = req.body;
   if (!name || !start_time || !end_time)
     return res.status(400).json({ message: 'Name, start_time and end_time are required' });
-  const shift = await ShiftTemplate.create({ name: name.trim(), start_time, end_time });
+
+  const crosses_midnight = detectCrossesMidnight(start_time, end_time);
+  const shift = await ShiftTemplate.create({
+    name: name.trim(), shift_type, start_time, end_time, crosses_midnight,
+  });
   res.status(201).json({ data: shift });
 });
 
 exports.updateShift = asyncHandler(async (req, res) => {
   const shift = await ShiftTemplate.findByPk(req.params.id);
   if (!shift) return res.status(404).json({ message: 'Shift not found' });
+
+  // Recalculate crosses_midnight if times changed
+  const start = req.body.start_time || shift.start_time;
+  const end   = req.body.end_time   || shift.end_time;
+  req.body.crosses_midnight = detectCrossesMidnight(start, end);
+
   await shift.update(req.body);
   res.json({ data: shift });
 });

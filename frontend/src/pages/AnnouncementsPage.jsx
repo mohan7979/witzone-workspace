@@ -227,7 +227,7 @@ function useDeleteConfirm() {
 /* ─── Main Export ─── */
 export default function AnnouncementsPage() {
   const { user } = useAuthStore();
-  const canManage = user?.role === 'hr' || user?.role === 'lead';
+  const canManage = user?.role === 'hr' || user?.role === 'lead' || user?.role === 'superuser';
 
   const queryClient = useQueryClient();
   const [modal, setModal] = useState(null); // null | 'create' | { ...item }

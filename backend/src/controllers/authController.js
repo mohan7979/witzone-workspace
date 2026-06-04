@@ -1,5 +1,6 @@
-const jwt      = require('jsonwebtoken');
-const { User } = require('../models');
+const jwt        = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
+const { User }   = require('../models');
 const { sendPasswordResetEmail } = require('../utils/mailer');
 const asyncHandler = require('../utils/asyncHandler');
 const { v4: uuidv4 } = require('uuid');
@@ -14,6 +15,85 @@ const safeUser = (user) => {
   delete u.last_idle_seconds;
   return u;
 };
+
+/* ── Microsoft Entra ID (Azure AD) SSO ─────────────────────────────── */
+
+/**
+ * Verify an Entra ID idToken using Microsoft's JWKS endpoint.
+ * Returns the decoded payload (claims) or throws.
+ */
+async function verifyEntraToken(idToken) {
+  const tenantId = process.env.AZURE_TENANT_ID;
+  if (!tenantId) throw new Error('AZURE_TENANT_ID not configured on server');
+
+  // Decode header first to get kid
+  const decoded = jwt.decode(idToken, { complete: true });
+  if (!decoded) throw new Error('Invalid token format');
+
+  const client = jwksClient({
+    jwksUri: `https://login.microsoftonline.com/${tenantId}/discovery/v2.0/keys`,
+    cache: true,
+    rateLimit: true,
+  });
+
+  const getKey = (header, callback) => {
+    client.getSigningKey(header.kid, (err, key) => {
+      if (err) return callback(err);
+      callback(null, key.getPublicKey());
+    });
+  };
+
+  return new Promise((resolve, reject) => {
+    jwt.verify(idToken, getKey, {
+      algorithms: ['RS256'],
+      audience: process.env.AZURE_CLIENT_ID,
+      issuer: [
+        `https://login.microsoftonline.com/${tenantId}/v2.0`,
+        `https://sts.windows.net/${tenantId}/`,
+      ],
+    }, (err, payload) => {
+      if (err) reject(err);
+      else resolve(payload);
+    });
+  });
+}
+
+exports.ssoLogin = asyncHandler(async (req, res) => {
+  const { idToken } = req.body;
+  if (!idToken) return res.status(400).json({ message: 'idToken is required' });
+
+  // Validate the Microsoft token
+  let claims;
+  try {
+    claims = await verifyEntraToken(idToken);
+  } catch (err) {
+    return res.status(401).json({ message: 'Invalid Microsoft token: ' + err.message });
+  }
+
+  // Extract email from token claims
+  const email = claims.preferred_username || claims.email || claims.upn;
+  if (!email) return res.status(401).json({ message: 'Email not found in Microsoft token' });
+
+  // Find user in our database by email
+  const user = await User.findOne({ where: { email: email.toLowerCase() } });
+  if (!user) {
+    return res.status(403).json({
+      message: `No HRMS account found for ${email}. Contact your HR administrator.`,
+    });
+  }
+
+  if (user.status !== 'active') {
+    return res.status(403).json({ message: 'Your account is inactive. Contact HR.' });
+  }
+
+  await user.update({ last_login: new Date() });
+
+  res.json({
+    token: signToken(user.id),
+    user:  safeUser(user),
+    password_reset_required: false, // SSO users skip password reset
+  });
+});
 
 exports.login = asyncHandler(async (req, res) => {
   const { email, password } = req.body;

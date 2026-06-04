@@ -1,13 +1,105 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { Users, UserCheck, UserX, CalendarClock, ArrowUpRight, TrendingUp } from 'lucide-react';
-import { reportApi, attendanceApi, leaveApi } from '@/api';
+import { Users, UserCheck, UserX, CalendarClock, ArrowUpRight, TrendingUp, Timer, PartyPopper, CalendarRange } from 'lucide-react';
+import { reportApi, attendanceApi, leaveApi, masterApi } from '@/api';
 import Badge from '@/components/ui/Badge';
-import { formatTime } from '@/lib/utils';
+import ClockWidget from '@/components/ui/ClockWidget';
+import { formatTime, formatDate, leaveTypeLabel, leaveStage } from '@/lib/utils';
+
+const STAGE_STYLES = {
+  approved:  { bg:'rgba(16,185,129,0.12)', color:'#34D399', border:'rgba(16,185,129,0.3)' },
+  rejected:  { bg:'rgba(239,68,68,0.12)',  color:'#F87171', border:'rgba(239,68,68,0.3)' },
+  cancelled: { bg:'rgba(148,163,184,0.12)',color:'rgba(203,213,225,0.7)', border:'rgba(148,163,184,0.25)' },
+  pending:   { bg:'rgba(251,191,36,0.12)', color:'#FBBF24', border:'rgba(251,191,36,0.3)' },
+};
+
+function StageChip({ leave }) {
+  const { label, kind } = leaveStage(leave);
+  const s = STAGE_STYLES[kind] || STAGE_STYLES.pending;
+  return (
+    <span style={{ fontSize:'10px', fontWeight:700, padding:'3px 8px', borderRadius:'6px', background:s.bg, color:s.color, border:`1px solid ${s.border}`, whiteSpace:'nowrap', flexShrink:0 }}>
+      {label}
+    </span>
+  );
+}
 import { AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 
 const glass   = { background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', borderRadius: '16px', backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)' };
 const glassHi = { background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.10)', borderRadius: '16px', backdropFilter: 'blur(16px)', WebkitBackdropFilter: 'blur(16px)' };
+
+// Shared request list — used for both Leave Requests and Permission Requests.
+function RequestList({ title, accent, requests, emptyText }) {
+  return (
+    <div style={glassHi}>
+      <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <p style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9' }}>{title}</p>
+        <a href="/leaves" style={{ fontSize:'11px', color:accent, textDecoration:'none', fontWeight:600, display:'flex', alignItems:'center', gap:'2px' }}>View all <ArrowUpRight size={11} /></a>
+      </div>
+      <div>
+        {!requests.length ? (
+          <div style={{ padding:'40px 20px', textAlign:'center' }}>
+            <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.2)' }}>{emptyText}</p>
+          </div>
+        ) : requests.map((leave) => (
+          <div key={leave.id} style={{ padding:'11px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', alignItems:'flex-start', gap:'10px', transition:'background 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.03)'}
+            onMouseLeave={e => e.currentTarget.style.background='transparent'}
+          >
+            <div style={{ width:'30px', height:'30px', borderRadius:'50%', flexShrink:0, background:'linear-gradient(135deg,#F472B6,#EC4899)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'10px', fontWeight:700, boxShadow:'0 0 12px rgba(244,114,182,0.3)', marginTop:'1px' }}>
+              {leave.user?.first_name?.[0]}{leave.user?.last_name?.[0]}
+            </div>
+            <div style={{ minWidth:0, flex:1 }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px' }}>
+                <p style={{ fontSize:'12px', fontWeight:600, color:'#F1F5F9', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{leave.user?.first_name} {leave.user?.last_name}</p>
+                <StageChip leave={leave} />
+              </div>
+              <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.55)', marginTop:'2px' }}>{leaveTypeLabel(leave.type)}</p>
+              <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', marginTop:'1px' }}>
+                {leave.type === 'permission'
+                  ? <>{formatDate(leave.start_date)} · {leave.start_time?.slice(0,5)}–{leave.end_time?.slice(0,5)}</>
+                  : <>{formatDate(leave.start_date)} — {formatDate(leave.end_date)} · {leave.duration_days}d</>}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Upcoming Holidays widget (sourced from the Holiday master — same data as calendars).
+function HolidayList({ holidays }) {
+  const HTYPE = { national:'#F87171', company:'#818CF8', optional:'#FBBF24' };
+  return (
+    <div style={glassHi}>
+      <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+        <p style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9', display:'flex', alignItems:'center', gap:'7px' }}><PartyPopper size={14} color="#FBBF24" /> Upcoming Holidays</p>
+        <a href="/calendar" style={{ fontSize:'11px', color:'#2DD4BF', textDecoration:'none', fontWeight:600, display:'flex', alignItems:'center', gap:'2px' }}>Calendar <ArrowUpRight size={11} /></a>
+      </div>
+      <div>
+        {!holidays.length ? (
+          <div style={{ padding:'40px 20px', textAlign:'center' }}>
+            <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.2)' }}>No upcoming holidays</p>
+          </div>
+        ) : holidays.map((h) => {
+          const d = new Date(`${h.date}T00:00:00`);   // parse as local date (avoid TZ off-by-one)
+          return (
+            <div key={h.id} style={{ padding:'11px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', alignItems:'center', gap:'12px' }}>
+              <div style={{ width:'40px', flexShrink:0, textAlign:'center', borderRadius:'9px', padding:'5px 0', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)' }}>
+                <p style={{ fontSize:'15px', fontWeight:800, color:'#F1F5F9', lineHeight:1 }}>{d.getDate()}</p>
+                <p style={{ fontSize:'9px', fontWeight:700, color:'rgba(241,245,249,0.4)', textTransform:'uppercase', marginTop:'2px' }}>{d.toLocaleString('en-US', { month:'short' })}</p>
+              </div>
+              <div style={{ minWidth:0, flex:1 }}>
+                <p style={{ fontSize:'12px', fontWeight:600, color:'#F1F5F9', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{h.name}</p>
+                <span style={{ fontSize:'10px', fontWeight:700, color: HTYPE[h.type] || '#94A3B8', textTransform:'capitalize' }}>{h.type || 'holiday'}</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 const STATS = [
   { label: 'Total Employees', key: 'total',   icon: Users,        color: '#818CF8', glow: 'rgba(129,140,248,0.25)', gradient: 'linear-gradient(135deg,#6366F1,#8B5CF6)', route: '/employees' },
@@ -57,7 +149,20 @@ export default function HRDashboard() {
   const navigate = useNavigate();
   const { data: stats }         = useQuery({ queryKey:['dashboard-stats'],       queryFn: reportApi.dashboard,                              refetchInterval:30000 });
   const { data: teamAtt }       = useQuery({ queryKey:['team-attendance-today'], queryFn:() => attendanceApi.teamAttendance({ limit:8 }), refetchInterval:30000 });
-  const { data: pendingLeaves } = useQuery({ queryKey:['pending-leaves'],        queryFn:() => leaveApi.pending({ limit:6 }),             refetchInterval:30000 });
+  const { data: pendingAll }    = useQuery({ queryKey:['pending-leaves'],        queryFn:() => leaveApi.pending({ limit:25 }),            refetchInterval:30000 });
+  const { data: holidayData }   = useQuery({ queryKey:['holidays'],              queryFn: masterApi.listHolidays,                         staleTime:5*60*1000 });
+
+  // Split the pending queue into leave requests vs. permission requests.
+  const pendingRequests = pendingAll?.data || [];
+  const leaveRequests      = pendingRequests.filter(l => l.type !== 'permission').slice(0, 6);
+  const permissionRequests = pendingRequests.filter(l => l.type === 'permission').slice(0, 6);
+
+  // Upcoming holidays (today onward), nearest first.
+  const todayStr = new Date().toISOString().split('T')[0];
+  const upcomingHolidays = (holidayData?.data || [])
+    .filter(h => h.date >= todayStr)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(0, 5);
 
   const total   = stats?.total_employees || 0;
   const present = stats?.present_today   || 0;
@@ -91,6 +196,9 @@ export default function HRDashboard() {
           Live · auto-refresh
         </div>
       </div>
+
+      {/* My Attendance (HR/Lead can also clock in/out) */}
+      <ClockWidget compact />
 
       {/* Stats */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px' }}>
@@ -131,34 +239,36 @@ export default function HRDashboard() {
           </div>
         </div>
 
-        {/* Pending */}
+        {/* Leave Requests */}
+        <RequestList title="Leave Requests" accent="#F472B6" requests={leaveRequests} emptyText="No pending leave requests" />
+      </div>
+
+      {/* Widgets row — Permission Requests · Upcoming Holidays · Calendar */}
+      <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:'16px' }}>
+        <RequestList title="Permission Requests" accent="#FBBF24" requests={permissionRequests} emptyText="No pending permission requests" />
+        <HolidayList holidays={upcomingHolidays} />
+
+        {/* Calendar quick-access */}
         <div style={glassHi}>
-          <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
-            <p style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9' }}>Pending Approvals</p>
-            <a href="/leaves" style={{ fontSize:'11px', color:'#F472B6', textDecoration:'none', fontWeight:600, display:'flex', alignItems:'center', gap:'2px' }}>View all <ArrowUpRight size={11} /></a>
+          <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.06)' }}>
+            <p style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9', display:'flex', alignItems:'center', gap:'7px' }}><CalendarRange size={14} color="#2DD4BF" /> Calendar View</p>
           </div>
-          <div>
-            {!pendingLeaves?.data?.length ? (
-              <div style={{ padding:'40px 20px', textAlign:'center' }}>
-                <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.2)' }}>No pending requests</p>
-              </div>
-            ) : pendingLeaves.data.map((leave) => (
-              <div key={leave.id} style={{ padding:'11px 16px', borderBottom:'1px solid rgba(255,255,255,0.04)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px', transition:'background 0.15s' }}
-                onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.03)'}
-                onMouseLeave={e => e.currentTarget.style.background='transparent'}
-              >
-                <div style={{ display:'flex', alignItems:'center', gap:'10px', minWidth:0 }}>
-                  <div style={{ width:'30px', height:'30px', borderRadius:'50%', flexShrink:0, background:'linear-gradient(135deg,#F472B6,#EC4899)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'10px', fontWeight:700, boxShadow:'0 0 12px rgba(244,114,182,0.3)' }}>
-                    {leave.user?.first_name?.[0]}{leave.user?.last_name?.[0]}
-                  </div>
-                  <div style={{ minWidth:0 }}>
-                    <p style={{ fontSize:'12px', fontWeight:600, color:'#F1F5F9', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{leave.user?.first_name} {leave.user?.last_name}</p>
-                    <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', textTransform:'capitalize' }}>{leave.type} · {leave.duration_days}d</p>
-                  </div>
-                </div>
-                <Badge status="pending" />
-              </div>
-            ))}
+          <div style={{ padding:'24px 20px', display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'14px', textAlign:'center' }}>
+            <div style={{ width:'52px', height:'52px', borderRadius:'14px', background:'linear-gradient(135deg,#14B8A6,#2DD4BF)', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 8px 20px rgba(45,212,191,0.3)' }}>
+              <CalendarRange size={24} color="white" />
+            </div>
+            <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.45)', lineHeight:1.5 }}>
+              View attendance, leaves and holidays across the month in a single calendar.
+            </p>
+            <button onClick={() => navigate('/calendar')} style={{
+              display:'inline-flex', alignItems:'center', gap:'7px', padding:'10px 20px', fontSize:'13px', fontWeight:700,
+              background:'linear-gradient(135deg,#14B8A6,#2DD4BF)', color:'white', border:'none', borderRadius:'10px', cursor:'pointer',
+              boxShadow:'0 4px 16px rgba(45,212,191,0.3)', transition:'all 0.2s',
+            }}
+              onMouseEnter={e => { e.currentTarget.style.transform='translateY(-1px)'; }}
+              onMouseLeave={e => { e.currentTarget.style.transform='none'; }}>
+              <CalendarRange size={14} /> Open Calendar
+            </button>
           </div>
         </div>
       </div>

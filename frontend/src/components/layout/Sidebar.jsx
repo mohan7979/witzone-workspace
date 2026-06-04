@@ -1,36 +1,83 @@
 import { NavLink, useNavigate } from 'react-router-dom';
 import useAuthStore from '@/store/authStore';
+import { isAdminRole } from '@/lib/utils';
 import {
   LayoutDashboard, Clock, CalendarDays, Users,
   BarChart3, Monitor, LogOut, Zap, CalendarRange, ChevronRight,
-  Database, TrendingUp, Megaphone,
+  Database, TrendingUp, Megaphone, UserCircle, ShieldCheck,
 } from 'lucide-react';
 
 const employeeLinks = [
-  { to: '/dashboard',       icon: LayoutDashboard, label: 'Dashboard',           color: '#818CF8', glow: 'rgba(129,140,248,0.35)' },
-  { to: '/attendance',      icon: Clock,            label: 'Attendance',          color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
-  { to: '/leaves',          icon: CalendarDays,     label: 'Leaves & Permission', color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
-  { to: '/leave-balance',   icon: TrendingUp,       label: 'Leave Balance',       color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
-  { to: '/announcements',   icon: Megaphone,        label: 'Announcements',       color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
-  { to: '/calendar',        icon: CalendarRange,    label: 'My Calendar',         color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
+  { to: '/dashboard',     icon: LayoutDashboard, label: 'Dashboard',           color: '#818CF8', glow: 'rgba(129,140,248,0.35)' },
+  { to: '/attendance',    icon: Clock,           label: 'Attendance',          color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
+  { to: '/leaves',        icon: CalendarDays,    label: 'Leaves & Permission', color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
+  { to: '/leave-balance', icon: TrendingUp,      label: 'Leave Balance',       color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
+  { to: '/announcements', icon: Megaphone,       label: 'Announcements',       color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
+  { to: '/calendar',      icon: CalendarRange,   label: 'My Calendar',         color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
 ];
 
-const adminLinks = [
-  { to: '/dashboard',       icon: LayoutDashboard, label: 'Dashboard',        color: '#818CF8', glow: 'rgba(129,140,248,0.35)' },
-  { to: '/attendance',      icon: Clock,            label: 'Attendance',       color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
-  { to: '/leaves',          icon: CalendarDays,     label: 'Leave Management', color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
-  { to: '/employees',       icon: Users,            label: 'Employees',        color: '#60A5FA', glow: 'rgba(96,165,250,0.35)'  },
-  { to: '/idle',            icon: Monitor,          label: 'Idle Monitor',     color: '#A78BFA', glow: 'rgba(167,139,250,0.35)' },
-  { to: '/reports',         icon: BarChart3,        label: 'Reports',          color: '#FBBF24', glow: 'rgba(251,191,36,0.35)'  },
-  { to: '/leave-balance',   icon: TrendingUp,       label: 'Leave Balance',    color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
-  { to: '/announcements',   icon: Megaphone,        label: 'Announcements',    color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
-  { to: '/master-data',     icon: Database,         label: 'Master Data',      color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
-  { to: '/calendar',        icon: CalendarRange,    label: 'My Calendar',      color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
+// Admin section — team management tools
+const adminCoreLinks = [
+  { to: '/dashboard',   icon: LayoutDashboard, label: 'Dashboard',        color: '#818CF8', glow: 'rgba(129,140,248,0.35)' },
+  { to: '/attendance',  icon: Clock,           label: 'Team Attendance',  color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
+  { to: '/leaves',      icon: CalendarDays,    label: 'Leave Management', color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
+  { to: '/employees',   icon: Users,           label: 'Employees',        color: '#60A5FA', glow: 'rgba(96,165,250,0.35)'  },
+  { to: '/idle',        icon: Monitor,         label: 'Idle Monitor',     color: '#A78BFA', glow: 'rgba(167,139,250,0.35)' },
+  { to: '/reports',     icon: BarChart3,       label: 'Reports',          color: '#FBBF24', glow: 'rgba(251,191,36,0.35)'  },
+  { to: '/leave-balance', icon: TrendingUp,    label: 'Leave Balances',   color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
+  { to: '/announcements', icon: Megaphone,     label: 'Announcements',    color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
+  { to: '/master-data', icon: Database,        label: 'Master Data',      color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
+  { to: '/audit-log',   icon: ShieldCheck,     label: 'Audit Log',        color: '#A78BFA', glow: 'rgba(167,139,250,0.35)' },
 ];
 
-const leadLinks = adminLinks.filter(l => l.to !== '/master-data');
+// Personal section for HR/Lead (same as employee workspace)
+const myWorkspaceLinks = [
+  { to: '/my-attendance', icon: Clock,        label: 'My Attendance',  color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
+  { to: '/my-leaves',     icon: CalendarDays, label: 'My Leaves',      color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
+  { to: '/my-balance',    icon: TrendingUp,   label: 'My Leave Balance',color:'#38BDF8',  glow: 'rgba(56,189,248,0.35)'  },
+  { to: '/calendar',      icon: CalendarRange,label: 'My Calendar',    color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
+];
+
+function NavItem({ to, icon: Icon, label, color, glow }) {
+  return (
+    <NavLink to={to} style={{ textDecoration: 'none' }}>
+      {({ isActive }) => (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '11px',
+          padding: '9px 12px', borderRadius: '12px',
+          background: isActive ? `linear-gradient(135deg, ${color}22 0%, ${color}10 100%)` : 'transparent',
+          border: isActive ? `1px solid ${color}30` : '1px solid transparent',
+          boxShadow: isActive ? `0 4px 16px ${glow.replace('0.35', '0.2')}` : 'none',
+          cursor: 'pointer', transition: 'all 0.2s ease',
+          position: 'relative', overflow: 'hidden',
+        }}
+          onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.border = '1px solid rgba(255,255,255,0.08)'; }}}
+          onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.border = '1px solid transparent'; }}}
+        >
+          {isActive && (
+            <div style={{ position: 'absolute', left: 0, top: '18%', bottom: '18%', width: '3px', borderRadius: '0 3px 3px 0', background: color, boxShadow: `0 0 8px ${color}` }} />
+          )}
+          <div style={{
+            width: '32px', height: '32px', borderRadius: '9px', flexShrink: 0,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: isActive ? `${color}20` : 'rgba(255,255,255,0.05)',
+            border: `1px solid ${isActive ? color + '35' : 'rgba(255,255,255,0.06)'}`,
+            boxShadow: isActive ? `0 0 12px ${color}30` : 'none', transition: 'all 0.2s',
+          }}>
+            <Icon size={14} color={isActive ? color : 'rgba(241,245,249,0.35)'} />
+          </div>
+          <span style={{ fontSize: '13px', fontWeight: isActive ? 600 : 400, color: isActive ? color : 'rgba(241,245,249,0.5)', letterSpacing: '-0.1px', transition: 'color 0.2s', flex: 1 }}>
+            {label}
+          </span>
+          {isActive && <ChevronRight size={12} color={`${color}80`} />}
+        </div>
+      )}
+    </NavLink>
+  );
+}
 
 const ROLE_CONFIG = {
+  superuser:{ label: 'Superuser',   color: '#F472B6', bg: 'rgba(244,114,182,0.15)', border: 'rgba(244,114,182,0.3)' },
   hr:       { label: 'HR Manager',  color: '#818CF8', bg: 'rgba(129,140,248,0.15)', border: 'rgba(129,140,248,0.3)' },
   lead:     { label: 'Team Lead',   color: '#34D399', bg: 'rgba(52,211,153,0.15)',  border: 'rgba(52,211,153,0.3)'  },
   employee: { label: 'Employee',    color: '#94A3B8', bg: 'rgba(148,163,184,0.1)',  border: 'rgba(148,163,184,0.2)' },
@@ -39,8 +86,14 @@ const ROLE_CONFIG = {
 export default function Sidebar() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
-  const isAdmin = user?.role === 'hr' || user?.role === 'lead';
-  const links = user?.role === 'hr' ? adminLinks : user?.role === 'lead' ? leadLinks : employeeLinks;
+  const isAdmin = isAdminRole(user?.role);
+  // HR & Superuser get the full admin toolset; Lead excludes Master Data;
+  // everyone else gets the employee links.
+  const coreLinks = (user?.role === 'hr' || user?.role === 'superuser')
+    ? adminCoreLinks
+    : user?.role === 'lead'
+      ? adminCoreLinks.filter(l => l.to !== '/master-data' && l.to !== '/audit-log')
+      : employeeLinks;
   const role = ROLE_CONFIG[user?.role] ?? ROLE_CONFIG.employee;
 
   const handleLogout = () => { logout(); navigate('/login'); };
@@ -90,65 +143,33 @@ export default function Sidebar() {
         </div>
       </div>
 
-      {/* ── Section Label ─────────────── */}
-      <div style={{ padding: '20px 20px 8px', position: 'relative', zIndex: 1 }}>
-        <p style={{ fontSize: '9px', fontWeight: 700, color: 'rgba(241,245,249,0.25)', textTransform: 'uppercase', letterSpacing: '1.5px' }}>
+      {/* ── Nav ──────────────────────── */}
+      <nav style={{ flex: 1, padding: '12px 10px 10px', display: 'flex', flexDirection: 'column', gap: '2px', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
+
+        {/* Section label */}
+        <p style={{ fontSize: '9px', fontWeight: 700, color: 'rgba(241,245,249,0.25)', textTransform: 'uppercase', letterSpacing: '1.5px', padding: '0 4px 6px' }}>
           {isAdmin ? 'Administration' : 'My Workspace'}
         </p>
-      </div>
 
-      {/* ── Nav Links ─────────────────── */}
-      <nav style={{ flex: 1, padding: '4px 10px 10px', display: 'flex', flexDirection: 'column', gap: '2px', overflowY: 'auto', position: 'relative', zIndex: 1 }}>
-        {links.map(({ to, icon: Icon, label, color, glow }) => (
-          <NavLink key={to} to={to} style={{ textDecoration: 'none' }}>
-            {({ isActive }) => (
-              <div style={{
-                display: 'flex', alignItems: 'center', gap: '11px',
-                padding: '9px 12px', borderRadius: '12px',
-                background: isActive ? `linear-gradient(135deg, ${color}22 0%, ${color}10 100%)` : 'transparent',
-                border: isActive ? `1px solid ${color}30` : '1px solid transparent',
-                boxShadow: isActive ? `0 4px 16px ${glow.replace('0.35', '0.2')}` : 'none',
-                cursor: 'pointer', transition: 'all 0.2s ease',
-                position: 'relative', overflow: 'hidden',
-              }}
-                onMouseEnter={e => { if (!isActive) { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.border = '1px solid rgba(255,255,255,0.08)'; }}}
-                onMouseLeave={e => { if (!isActive) { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.border = '1px solid transparent'; }}}
-              >
-                {/* Accent bar */}
-                {isActive && (
-                  <div style={{
-                    position: 'absolute', left: 0, top: '18%', bottom: '18%',
-                    width: '3px', borderRadius: '0 3px 3px 0',
-                    background: color, boxShadow: `0 0 8px ${color}`,
-                  }} />
-                )}
-
-                {/* Icon */}
-                <div style={{
-                  width: '32px', height: '32px', borderRadius: '9px', flexShrink: 0,
-                  display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  background: isActive ? `${color}20` : 'rgba(255,255,255,0.05)',
-                  border: `1px solid ${isActive ? color + '35' : 'rgba(255,255,255,0.06)'}`,
-                  boxShadow: isActive ? `0 0 12px ${color}30` : 'none',
-                  transition: 'all 0.2s',
-                }}>
-                  <Icon size={14} color={isActive ? color : 'rgba(241,245,249,0.35)'} />
-                </div>
-
-                {/* Label */}
-                <span style={{
-                  fontSize: '13px', fontWeight: isActive ? 600 : 400,
-                  color: isActive ? color : 'rgba(241,245,249,0.5)',
-                  letterSpacing: '-0.1px', transition: 'color 0.2s', flex: 1,
-                }}>
-                  {label}
-                </span>
-
-                {isActive && <ChevronRight size={12} color={`${color}80`} />}
-              </div>
-            )}
-          </NavLink>
+        {coreLinks.map(({ to, icon: Icon, label, color, glow }) => (
+          <NavItem key={to} to={to} icon={Icon} label={label} color={color} glow={glow} />
         ))}
+
+        {/* My Workspace section — only for HR/Lead */}
+        {isAdmin && (
+          <>
+            <div style={{ margin: '10px 4px 6px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.06)' }} />
+              <p style={{ fontSize: '9px', fontWeight: 700, color: 'rgba(241,245,249,0.2)', textTransform: 'uppercase', letterSpacing: '1.5px', whiteSpace: 'nowrap', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <UserCircle size={10} style={{ opacity: 0.4 }} /> My Workspace
+              </p>
+              <div style={{ flex: 1, height: '1px', background: 'rgba(255,255,255,0.06)' }} />
+            </div>
+            {myWorkspaceLinks.map(({ to, icon: Icon, label, color, glow }) => (
+              <NavItem key={to} to={to} icon={Icon} label={label} color={color} glow={glow} />
+            ))}
+          </>
+        )}
       </nav>
 
       {/* ── User Footer ───────────────── */}

@@ -1,14 +1,19 @@
 const router = require('express').Router();
-const { apply, myLeaves, cancel, pendingLeaves, tlReview, hrReview } = require('../controllers/leaveController');
+const { apply, myLeaves, cancel, pendingLeaves, tlReview, hrReview, getPolicy, resetAnnualLeaves } = require('../controllers/leaveController');
 const { authenticate, authorize } = require('../middleware/auth');
+const upload = require('../middleware/upload');
+const path   = require('path');
 
 router.use(authenticate);
 
-router.post('/',             apply);
-router.get('/my',            myLeaves);
-router.patch('/:id/cancel',  cancel);
-router.get('/pending',       authorize('hr', 'lead'), pendingLeaves);
-router.patch('/:id/tl-review', authorize('lead'),      tlReview);
-router.patch('/:id/hr-review', authorize('hr'),         hrReview);
+router.get('/policy',           getPolicy);                          // all roles
+// medical_cert is the optional file field (multer); single() so only one file is accepted
+router.post('/',                upload.single('medical_cert'), apply);
+router.get('/my',               myLeaves);
+router.patch('/:id/cancel',     cancel);
+router.get('/pending',          authorize('hr', 'lead'), pendingLeaves);
+router.patch('/:id/tl-review',  authorize('lead'),       tlReview);
+router.patch('/:id/hr-review',  authorize('hr'),         hrReview);
+router.post('/reset-annual',    authorize('hr'),         resetAnnualLeaves);
 
 module.exports = router;

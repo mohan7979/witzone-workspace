@@ -18,7 +18,11 @@ const authenticate = async (req, res, next) => {
 };
 
 const authorize = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role))
+  const allowed = new Set(roles);
+  // Superuser is a strict superset of HR: anywhere HR is permitted (monitoring,
+  // reports, idle, attendance, leave review, audit), superuser is too.
+  if (allowed.has('hr')) allowed.add('superuser');
+  if (!allowed.has(req.user.role))
     return res.status(403).json({ message: 'Access denied' });
   next();
 };

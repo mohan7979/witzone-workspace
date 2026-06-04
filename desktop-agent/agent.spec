@@ -8,7 +8,7 @@ a = Analysis(
     ['agent.py'],
     pathex=[],
     binaries=[],
-    datas=[],
+    datas=[('witzone.png', '.')],   # bundled logo for the system-tray icon
     hiddenimports=[
         # pynput Windows backend
         'pynput.keyboard._win32',
@@ -19,6 +19,7 @@ a = Analysis(
         'PIL._tkinter_finder',
         'PIL.Image',
         'PIL.ImageDraw',
+        'PIL.ImageEnhance',
         # requests + urllib3
         'requests',
         'urllib3',
@@ -62,5 +63,5 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon='icon.ico',   # Uncomment and add icon.ico if you have one
+    icon='icon.ico',     # Witzone logo — shown on WitzoneAgent.exe in Explorer/taskbar
 )

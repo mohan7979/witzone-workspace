@@ -2,6 +2,7 @@ import api from './client';
 
 export const authApi = {
   login: (data) => api.post('/auth/login', data),
+  ssoLogin: (idToken) => api.post('/auth/sso', { idToken }),
   me: () => api.get('/auth/me'),
   changePassword: (data) => api.patch('/auth/change-password', data),
   resetPassword: (userId) => api.post(`/auth/reset-password/${userId}`),
@@ -9,21 +10,30 @@ export const authApi = {
 };
 
 export const attendanceApi = {
-  clockIn: () => api.post('/attendance/clock-in'),
-  clockOut: () => api.post('/attendance/clock-out'),
-  today: () => api.get('/attendance/today'),
-  myHistory: (params) => api.get('/attendance/my-history', { params }),
-  teamAttendance: (params) => api.get('/attendance/team', { params }),
-  calendar: (params) => api.get('/attendance/calendar', { params }),
+  clockIn:    ()       => api.post('/attendance/clock-in'),
+  clockOut:   ()       => api.post('/attendance/clock-out'),
+  startBreak: ()       => api.post('/attendance/start-break'),
+  endBreak:   ()       => api.post('/attendance/end-break'),
+  today:      ()       => api.get('/attendance/today'),
+  myHistory:  (params) => api.get('/attendance/my-history',  { params }),
+  teamAttendance: (params) => api.get('/attendance/team',    { params }),
+  calendar:   (params) => api.get('/attendance/calendar',    { params }),
 };
 
 export const leaveApi = {
-  apply:    (data)     => api.post('/leaves', data),
-  myLeaves: (params)   => api.get('/leaves/my', { params }),
-  cancel:   (id)       => api.patch(`/leaves/${id}/cancel`),
-  pending:  (params)   => api.get('/leaves/pending', { params }),
-  tlReview: (id, data) => api.patch(`/leaves/${id}/tl-review`, data),
-  hrReview: (id, data) => api.patch(`/leaves/${id}/hr-review`, data),
+  apply: (data) => {
+    if (data instanceof FormData) {
+      return api.post('/leaves', data, { headers: { 'Content-Type': 'multipart/form-data' } });
+    }
+    return api.post('/leaves', data);
+  },
+  myLeaves:         (params)   => api.get('/leaves/my', { params }),
+  cancel:           (id)       => api.patch(`/leaves/${id}/cancel`),
+  pending:          (params)   => api.get('/leaves/pending', { params }),
+  tlReview:         (id, data) => api.patch(`/leaves/${id}/tl-review`, data),
+  hrReview:         (id, data) => api.patch(`/leaves/${id}/hr-review`, data),
+  getPolicy:        ()         => api.get('/leaves/policy'),
+  resetAnnualLeaves:()         => api.post('/leaves/reset-annual'),
 };
 
 export const userApi = {
@@ -33,8 +43,14 @@ export const userApi = {
   update: (id, data) => api.patch(`/users/${id}`, data),
   terminate: (id) => api.delete(`/users/${id}`),
   reactivate: (id) => api.patch(`/users/${id}/reactivate`),
+  grantCompOff: (id, data) => api.patch(`/users/${id}/grant-comp-off`, data),
+  changeWorkMode: (id, work_mode) => api.patch(`/users/${id}/work-mode`, { work_mode }),
   departments: () => api.get('/users/departments'),
   leaveBalances: () => api.get('/users/leave-balances'),
+};
+
+export const auditApi = {
+  list: (params) => api.get('/audit', { params }),
 };
 
 export const idleApi = {
@@ -50,6 +66,9 @@ export const reportApi = {
   attendance: (params) => api.get('/reports/attendance', { params }),
   leaves: (params) => api.get('/reports/leaves', { params }),
   idle: (params) => api.get('/reports/idle', { params }),
+  activity: (params) => api.get('/reports/activity', { params }),
+  // File exports (csv|xlsx|pdf) — returns a Blob for client-side download.
+  activityExport: (params) => api.get('/reports/activity', { params, responseType: 'blob' }),
 };
 
 export const masterApi = {

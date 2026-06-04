@@ -7,25 +7,23 @@ const {
   sendHrNotificationEmail,
 } = require('../utils/mailer');
 const asyncHandler = require('../utils/asyncHandler');
+const { LEAVE_POLICY, computeAnnualReset } = require('../utils/leavePolicy');
+const { recordAudit } = require('../utils/audit');
 
 const LEAVE_BALANCE_FIELDS = {
   casual:   'casual_leave_balance',
   sick:     'sick_leave_balance',
   comp_off: 'comp_off_balance',
-  wfh:      'wfh_leave_balance',
-  wfo:      'wfo_leave_balance',
   marriage: 'marriage_leave_balance',
   maternity:'maternity_leave_balance',
 };
 
-const VALID_TYPES = [
-  'casual', 'sick', 'comp_off', 'permission', 'unpaid',
-  'wfh', 'wfo', 'marriage', 'maternity',
-];
+const VALID_TYPES = Object.keys(LEAVE_POLICY);
 
 // ─── Apply for leave ──────────────────────────────────────────────────────────
 exports.apply = asyncHandler(async (req, res) => {
   const { type, start_date, end_date, start_time, end_time, reason, document_note } = req.body;
+  const uploadedFile = req.file ? req.file.filename : null;
 
   if (!type || !VALID_TYPES.includes(type))
     return res.status(400).json({ message: `type must be one of: ${VALID_TYPES.join(', ')}` });
@@ -52,6 +50,24 @@ exports.apply = asyncHandler(async (req, res) => {
     duration_days = moment(end_date).diff(moment(start_date), 'days') + 1;
   }
 
+  // ── Policy enforcement ───────────────────────────────────────────────────
+  const policy = LEAVE_POLICY[type];
+
+  // Sick leave: medical certificate upload is mandatory
+  if (policy?.requires_document && !uploadedFile) {
+    return res.status(400).json({
+      message: 'Sick leave requires a medical certificate (PDF, JPG or PNG, max 5 MB).',
+    });
+  }
+
+  // Max days per application (marriage ≤ 5, maternity ≤ 90)
+  if (policy?.max_at_once && duration_days > policy.max_at_once) {
+    return res.status(400).json({
+      message: `${policy.label} cannot exceed ${policy.max_at_once} days per application.`,
+    });
+  }
+  // ─────────────────────────────────────────────────────────────────────────
+
   // Check for overlapping non-cancelled leaves
   const overlap = await Leave.findOne({
     where: {
@@ -64,12 +80,16 @@ exports.apply = asyncHandler(async (req, res) => {
   if (overlap)
     return res.status(400).json({ message: 'You already have a leave request overlapping these dates' });
 
-  // Check balance
+  // Check balance (unpaid / permission don't need a balance)
   const balanceField = LEAVE_BALANCE_FIELDS[type];
   if (balanceField && parseFloat(req.user[balanceField]) < duration_days)
-    return res.status(400).json({ message: `Insufficient ${type} leave balance` });
+    return res.status(400).json({
+      message: `Insufficient ${policy?.label || type} balance. Available: ${req.user[balanceField]} day(s).`,
+    });
 
-  // If employee has no manager, TL stage is skipped — set tl_status to approved immediately
+  // If the employee has no assigned TL, the TL stage is bypassed and the request
+  // goes straight to HR. We flag this with tl_skipped (NOT tl_status='approved'),
+  // so the UI never shows a false "TL Approved" for a review that never happened.
   const skipTl = !req.user.manager_id;
 
   const leave = await Leave.create({
@@ -80,15 +100,19 @@ exports.apply = asyncHandler(async (req, res) => {
     end_time:      isPermission ? end_time   : null,
     duration_days, reason,
     document_note: document_note || null,
-    status:    'pending',
-    tl_status: skipTl ? 'approved' : null,
+    document_file: uploadedFile || null,
+    status:        'pending',
+    tl_status:     null,
+    tl_skipped:    skipTl,
   });
 
   if (skipTl) {
-    // No TL — notify all HR users directly
-    const hrs = await User.findAll({ where: { role: 'hr', status: 'active' } });
-    for (const hr of hrs) {
-      sendHrNotificationEmail(hr.email, req.user, leave, 'N/A (no TL assigned)').catch(() => {});
+    // No TL — route straight to the final approver. Employee requests go to HR;
+    // requests from TLs / HR / superusers go to the Superuser (separation of duties).
+    const approverRole = req.user.role === 'employee' ? 'hr' : 'superuser';
+    const approvers = await User.findAll({ where: { role: approverRole, status: 'active' } });
+    for (const a of approvers) {
+      sendHrNotificationEmail(a.email, req.user, leave, 'N/A (no TL assigned)').catch(() => {});
     }
   } else {
     // Notify the assigned TL
@@ -156,8 +180,9 @@ exports.cancel = asyncHandler(async (req, res) => {
 // ─── Pending leaves list (scoped by role) ─────────────────────────────────────
 exports.pendingLeaves = asyncHandler(async (req, res) => {
   const { type, status, page = 1, limit = 20 } = req.query;
-  const isHR   = req.user.role === 'hr';
-  const isLead = req.user.role === 'lead';
+  const isHR    = req.user.role === 'hr';
+  const isLead  = req.user.role === 'lead';
+  const isSuper = req.user.role === 'superuser';
 
   const leaveWhere = {};
   const userWhere  = { status: 'active' };
@@ -176,11 +201,25 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     }
   } else if (isHR) {
     if (!status || status === 'pending') {
-      // HR sees leaves where TL approved, waiting final HR decision
-      leaveWhere.tl_status = 'approved';
-      leaveWhere.status    = 'pending';
+      // HR finalises EMPLOYEE leaves once the TL has approved (or there was no TL).
+      // Requests submitted by TLs / HR are routed to the Superuser instead.
+      leaveWhere.status = 'pending';
+      leaveWhere[Op.or] = [{ tl_status: 'approved' }, { tl_skipped: true }];
+      userWhere.role    = 'employee';
     } else if (status === 'all') {
-      // No filter — show everything
+      // No filter — full visibility for reporting
+    } else {
+      leaveWhere.status = status;
+    }
+  } else if (isSuper) {
+    if (!status || status === 'pending') {
+      // Superuser's actionable queue: leaves submitted by TLs / HR / other
+      // superusers, awaiting a final decision.
+      leaveWhere.status = 'pending';
+      leaveWhere[Op.or] = [{ tl_status: 'approved' }, { tl_skipped: true }];
+      userWhere.role    = { [Op.in]: ['lead', 'hr', 'superuser'] };
+    } else if (status === 'all') {
+      // Full visibility across the whole organisation
     } else {
       leaveWhere.status = status;
     }
@@ -191,10 +230,9 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     include: [
       {
         model: User, as: 'user', where: userWhere,
-        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department',
+        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'work_mode',
                      'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
-                     'wfh_leave_balance', 'wfo_leave_balance', 'marriage_leave_balance',
-                     'maternity_leave_balance'],
+                     'marriage_leave_balance', 'maternity_leave_balance'],
       },
       { model: User, as: 'reviewer',   attributes: ['first_name', 'last_name'], required: false },
       { model: User, as: 'tlReviewer', attributes: ['first_name', 'last_name'], required: false },
@@ -234,6 +272,13 @@ exports.tlReview = asyncHandler(async (req, res) => {
     ...(action === 'rejected' ? { status: 'rejected', reviewed_by: req.user.id, reviewer_comment: comment, reviewed_at: new Date() } : {}),
   });
 
+  await recordAudit(req.user, 'leave.tl_review', {
+    entity_type: 'leave', entity_id: leave.id,
+    entity_label: `${leave.user.first_name} ${leave.user.last_name} · ${leave.type}`,
+    new_value: `TL ${action}`,
+    metadata: { decision: action, comment: comment || null, stage: 'tl' },
+  });
+
   if (action === 'approved') {
     // Notify all HR users for final decision
     const hrs = await User.findAll({ where: { role: 'hr', status: 'active' } });
@@ -261,8 +306,14 @@ exports.hrReview = asyncHandler(async (req, res) => {
   if (!leave) return res.status(404).json({ message: 'Leave not found' });
   if (leave.status !== 'pending')
     return res.status(400).json({ message: 'Leave is no longer pending' });
-  if (leave.tl_status !== 'approved')
+  if (leave.tl_status !== 'approved' && !leave.tl_skipped)
     return res.status(400).json({ message: 'TL approval is required before HR can act' });
+
+  // Separation of duties: leaves submitted by TLs / HR / superusers can only be
+  // finalised by a Superuser. HR finalises employee leaves only.
+  const isSuper = req.user.role === 'superuser';
+  if (!isSuper && leave.user.role !== 'employee')
+    return res.status(403).json({ message: 'Leave requests from Team Leads or HR can only be reviewed by a Superuser.' });
 
   await leave.update({
     status:           action,
@@ -293,6 +344,45 @@ exports.hrReview = asyncHandler(async (req, res) => {
     }
   }
 
+  await recordAudit(req.user, 'leave.hr_review', {
+    entity_type: 'leave', entity_id: leave.id,
+    entity_label: `${leave.user.first_name} ${leave.user.last_name} · ${leave.type}`,
+    new_value: `HR ${action}`,
+    metadata: { decision: action, comment: comment || null, stage: 'hr', tl_skipped: leave.tl_skipped },
+  });
+
   sendLeaveNotificationEmail(leave.user.email, leave.user, leave, action).catch(() => {});
   res.json({ message: `Leave ${action}`, leave });
+});
+
+// ─── Get leave policy (frontend reads this) ───────────────────────────────────
+exports.getPolicy = asyncHandler(async (req, res) => {
+  res.json({ policy: LEAVE_POLICY });
+});
+
+// ─── Annual leave balance reset (HR only) ─────────────────────────────────────
+// Resets annual leaves for all active employees.
+// WFH: carry forward (unused + 8, capped at 16).
+// All other annual leaves: reset to policy default.
+// One-time / earned leaves (marriage, maternity, comp_off) are untouched.
+exports.resetAnnualLeaves = asyncHandler(async (req, res) => {
+  const employees = await User.findAll({ where: { status: 'active' } });
+  const year = new Date().getFullYear();
+  const results = [];
+
+  for (const emp of employees) {
+    const updates = computeAnnualReset(emp);
+    await emp.update(updates);
+    results.push({
+      employee_id: emp.employee_id,
+      name: `${emp.first_name} ${emp.last_name}`,
+      updates,
+    });
+  }
+
+  res.json({
+    message: `Annual leave balances reset for ${year}. ${employees.length} employee(s) updated.`,
+    year,
+    details: results,
+  });
 });

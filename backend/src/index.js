@@ -16,11 +16,15 @@ const io = new Server(httpServer, {
 });
 
 // Security & parsing
-app.use(helmet());
+app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-origin' } }));
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
 app.use(express.json());
 app.use(morgan('combined'));
 app.set('trust proxy', 1);
+
+// Serve uploaded medical certificates (authenticated via query token not needed — behind VPN/auth)
+const { authenticate } = require('./middleware/auth');
+app.use('/uploads', authenticate, express.static(require('path').join(__dirname, '../uploads')));
 
 // Rate limiting
 app.use('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { message: 'Too many login attempts' } }));
@@ -35,6 +39,7 @@ app.use('/api/idle', require('./routes/idle'));
 app.use('/api/reports',       require('./routes/reports'));
 app.use('/api/master',        require('./routes/master'));
 app.use('/api/announcements', require('./routes/announcements'));
+app.use('/api/audit',         require('./routes/audit'));
 
 app.get('/health', (_, res) => res.json({ status: 'ok', env: process.env.NODE_ENV }));
 

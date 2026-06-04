@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useEffect, useState } from 'react';
 import { idleApi } from '@/api';
-import { formatIdleTime, formatTime } from '@/lib/utils';
+import { formatHMS, formatTime } from '@/lib/utils';
 import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -29,7 +29,9 @@ function IdleTimelineModal({ userId, date, name, onClose }) {
 
   const timeline  = data?.timeline || [];
   const totalWork = timeline.filter(t => t.type === 'work').reduce((s, t) => s + t.duration_minutes, 0);
-  const totalIdle = timeline.filter(t => t.type === 'idle').reduce((s, t) => s + t.duration_minutes, 0);
+  const totalIdleSecs  = data?.total_idle_seconds ?? timeline.filter(t => t.type === 'idle').reduce((s, t) => s + (t.duration_seconds ?? t.duration_minutes * 60), 0);
+  const totalBreakSecs = data?.total_break_seconds ?? 0;
+  const longIdleCount  = data?.long_idle_sessions ?? timeline.filter(t => t.type === 'idle' && t.long_idle).length;
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(4,7,18,0.8)', backdropFilter:'blur(8px)' }}>
@@ -60,7 +62,9 @@ function IdleTimelineModal({ userId, date, name, onClose }) {
                   { icon:<Clock size={11}/>, label:`Clocked in: ${formatTime(data.attendance.login_time)}`, bg:'rgba(129,140,248,0.15)', color:'#818CF8', border:'rgba(129,140,248,0.3)' },
                   ...(data.attendance.logout_time ? [{ icon:<Clock size={11}/>, label:`Clocked out: ${formatTime(data.attendance.logout_time)}`, bg:'rgba(255,255,255,0.06)', color:'rgba(241,245,249,0.6)', border:'rgba(255,255,255,0.12)' }] : []),
                   { icon:null, label:`Work: ${totalWork}m`, bg:'rgba(52,211,153,0.15)', color:'#34D399', border:'rgba(52,211,153,0.3)' },
-                  { icon:null, label:`Idle: ${formatIdleTime(totalIdle * 60)}`, bg:'rgba(248,113,113,0.15)', color:'#F87171', border:'rgba(248,113,113,0.3)' },
+                  { icon:null, label:`Idle Time: ${formatHMS(totalIdleSecs)}`, bg:'rgba(248,113,113,0.15)', color:'#F87171', border:'rgba(248,113,113,0.3)' },
+                  { icon:null, label:`Break Time: ${formatHMS(totalBreakSecs)}`, bg:'rgba(251,191,36,0.15)', color:'#FBBF24', border:'rgba(251,191,36,0.3)' },
+                  ...(longIdleCount > 0 ? [{ icon:<AlertTriangle size={11}/>, label:`${longIdleCount} long idle (≥30m)`, bg:'rgba(248,113,113,0.2)', color:'#F87171', border:'rgba(248,113,113,0.4)' }] : []),
                 ].map(({ icon, label, bg, color, border }, i) => (
                   <span key={i} style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'5px 12px', borderRadius:'8px', fontSize:'12px', fontWeight:600, background:bg, color, border:`1px solid ${border}` }}>
                     {icon}{label}
@@ -81,11 +85,18 @@ function IdleTimelineModal({ userId, date, name, onClose }) {
                           {i < timeline.length - 1 && <div style={{ flex:1, width:'2px', background:'rgba(255,255,255,0.07)', minHeight:'8px' }} />}
                         </div>
                         <div style={{ flex:1, padding:'10px 14px', marginBottom:'4px', borderRadius:'10px', border:'1px solid', background: isIdle ? 'rgba(248,113,113,0.06)' : 'rgba(52,211,153,0.06)', borderColor: isIdle ? 'rgba(248,113,113,0.2)' : 'rgba(52,211,153,0.2)' }}>
-                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center' }}>
-                            <span style={{ fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', color: isIdle ? '#F87171' : '#34D399' }}>
+                          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', gap:'8px' }}>
+                            <span style={{ display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:700, textTransform:'uppercase', letterSpacing:'0.5px', color: isIdle ? '#F87171' : '#34D399' }}>
                               {isIdle ? 'Idle' : 'Working'}
+                              {isIdle && entry.long_idle && (
+                                <span style={{ display:'inline-flex', alignItems:'center', gap:'3px', textTransform:'none', letterSpacing:0, fontSize:'10px', fontWeight:700, padding:'1px 6px', borderRadius:'5px', background:'rgba(248,113,113,0.2)', color:'#F87171', border:'1px solid rgba(248,113,113,0.4)' }}>
+                                  <AlertTriangle size={9} /> Long idle
+                                </span>
+                              )}
                             </span>
-                            <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', fontWeight:600 }}>{entry.duration_minutes}m</span>
+                            <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', fontWeight:600 }}>
+                              {isIdle ? formatHMS(entry.duration_seconds ?? entry.duration_minutes * 60) : `${entry.duration_minutes}m`}
+                            </span>
                           </div>
                           <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.5)', marginTop:'3px' }}>
                             {formatHHMM(entry.start)} → {formatHHMM(entry.end)}
@@ -137,7 +148,7 @@ function UserRow({ user, type }) {
         )}
         {type === 'idle' && (
           <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'4px 12px', borderRadius:'7px', fontSize:'11px', fontWeight:700, background:'rgba(248,113,113,0.15)', color:'#F87171', border:'1px solid rgba(248,113,113,0.3)' }}>
-            <AlertTriangle size={11} /> {formatIdleTime(user.idle_seconds)} idle
+            <AlertTriangle size={11} /> {formatHMS(user.idle_seconds)} idle
           </span>
         )}
         {type === 'active' && (
@@ -171,7 +182,7 @@ export default function IdleMonitorPage() {
     idle.forEach((u) => {
       if (u.idle_seconds >= HIGH_IDLE && !alertedHighIdle.current.has(u.user_id)) {
         alertedHighIdle.current.add(u.user_id);
-        toast(`${u.first_name} ${u.last_name} has been idle for ${formatIdleTime(u.idle_seconds)}`, { icon:'⚠️', style:{ background:'rgba(248,113,113,0.15)', color:'#F87171', fontWeight:600, border:'1px solid rgba(248,113,113,0.3)' }, duration:6000 });
+        toast(`${u.first_name} ${u.last_name} has been idle for ${formatHMS(u.idle_seconds)}`, { icon:'⚠️', style:{ background:'rgba(248,113,113,0.15)', color:'#F87171', fontWeight:600, border:'1px solid rgba(248,113,113,0.3)' }, duration:6000 });
       }
     });
     disconnected.forEach((u) => {
@@ -282,15 +293,16 @@ export default function IdleMonitorPage() {
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
-              <tr>{['Employee','Department','Idle Events','Total Idle Time','Risk Level',''].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr>
+              <tr>{['Employee','Department','Idle Events','Total Idle Time','Total Break Time','Risk Level',''].map((h) => <th key={h} style={S.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {!team?.data?.length ? (
-                <tr><td colSpan={6} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No idle data recorded today</td></tr>
+                <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No idle data recorded today</td></tr>
               ) : (
                 team.data.map((row, i) => {
-                  const secs   = parseInt(row.dataValues?.total_idle_seconds || row.total_idle_seconds || 0);
-                  const isHigh = secs > HIGH_IDLE;
+                  const secs      = parseInt(row.dataValues?.total_idle_seconds || row.total_idle_seconds || 0);
+                  const breakSecs = parseInt(row.total_break_seconds || 0);
+                  const isHigh    = secs > HIGH_IDLE;
                   return (
                     <tr key={i} style={{ transition:'background 0.12s' }}
                       onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
@@ -301,7 +313,8 @@ export default function IdleMonitorPage() {
                       </td>
                       <td style={S.td}>{row.user?.department || '—'}</td>
                       <td style={{ ...S.td, fontWeight:600 }}>{row.dataValues?.idle_events || row.idle_events || 0}</td>
-                      <td style={{ ...S.td, fontWeight:700, color: isHigh ? '#F87171' : '#34D399' }}>{formatIdleTime(secs)}</td>
+                      <td style={{ ...S.td, fontWeight:700, color: isHigh ? '#F87171' : '#34D399', fontVariantNumeric:'tabular-nums' }}>{formatHMS(secs)}</td>
+                      <td style={{ ...S.td, fontWeight:700, color:'#FBBF24', fontVariantNumeric:'tabular-nums' }}>{formatHMS(breakSecs)}</td>
                       <td style={S.td}>
                         <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'4px 10px', borderRadius:'7px', fontSize:'11px', fontWeight:700, background: isHigh ? 'rgba(248,113,113,0.15)' : 'rgba(52,211,153,0.15)', color: isHigh ? '#F87171' : '#34D399', border:`1px solid ${isHigh ? 'rgba(248,113,113,0.3)' : 'rgba(52,211,153,0.3)'}` }}>
                           {isHigh ? <AlertTriangle size={10} /> : <CheckCircle2 size={10} />}

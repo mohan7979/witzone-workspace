@@ -8,6 +8,8 @@ const Designation  = require('./Designation');
 const Holiday      = require('./Holiday');
 const ShiftTemplate = require('./ShiftTemplate');
 const Announcement = require('./Announcement');
+const AuditLog     = require('./AuditLog');
+const BreakLog     = require('./BreakLog');
 
 // ── Core associations ──────────────────────────────────────────────
 User.hasMany(Attendance, { foreignKey: 'user_id', as: 'attendances' });
@@ -29,6 +31,13 @@ User.hasMany(User,  { foreignKey: 'manager_id', as: 'team' });
 // ── Announcement author ────────────────────────────────────────────
 Announcement.belongsTo(User, { foreignKey: 'created_by', as: 'author' });
 
+// ── Audit trail ────────────────────────────────────────────────────
+AuditLog.belongsTo(User, { foreignKey: 'actor_id', as: 'actor' });
+
+// ── Break log ──────────────────────────────────────────────────────
+User.hasMany(BreakLog, { foreignKey: 'user_id', as: 'breakLogs' });
+BreakLog.belongsTo(User, { foreignKey: 'user_id', as: 'user' });
+
 module.exports = {
   sequelize,
   User,
@@ -40,4 +49,6 @@ module.exports = {
   Holiday,
   ShiftTemplate,
   Announcement,
+  AuditLog,
+  BreakLog,
 };

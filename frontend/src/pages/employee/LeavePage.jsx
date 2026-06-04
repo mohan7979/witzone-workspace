@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Plus, X, CalendarDays, FileText } from 'lucide-react';
-import { leaveApi } from '@/api';
+import { Plus, X, CalendarDays, FileText, Upload, CheckCircle } from 'lucide-react';
+import { leaveApi, authApi } from '@/api';
 import Badge from '@/components/ui/Badge';
 import { formatDate } from '@/lib/utils';
 import toast from 'react-hot-toast';
@@ -19,16 +19,16 @@ const pink = { focus: 'rgba(244,114,182,0.6)', glow: 'rgba(244,114,182,0.1)' };
 const onFocus = (e) => { e.target.style.borderColor = pink.focus; e.target.style.boxShadow = `0 0 0 3px ${pink.glow}`; };
 const onBlur  = (e) => { e.target.style.borderColor = 'rgba(255,255,255,0.1)'; e.target.style.boxShadow = 'none'; };
 
+// WFH employees get 8 days personal leave (carry-forward), WFO employees get 12 days (resets)
+// The balance shown to the employee reflects their work mode — only one "Personal Leave" type exists
 const LEAVE_TYPES = [
-  { value:'casual',     label:'Casual Leave',            policy:'' },
-  { value:'wfh',        label:'WFH Leave',               policy:'8 days / year (carry forward)' },
-  { value:'wfo',        label:'WFO Leave',               policy:'12 days / year' },
-  { value:'sick',       label:'Sick Leave',              policy:'Document required' },
-  { value:'marriage',   label:'Marriage Leave',          policy:'5 days' },
-  { value:'maternity',  label:'Maternity Leave',         policy:'3 months (90 days)' },
-  { value:'comp_off',   label:'Comp Off',                policy:'' },
-  { value:'permission', label:'Permission (Hourly)',     policy:'' },
-  { value:'unpaid',     label:'Unpaid Leave',            policy:'' },
+  { value:'casual',     label:'Personal Leave',      policy:'WFH: 8 days/yr (carry forward) · WFO: 12 days/yr' },
+  { value:'sick',       label:'Sick Leave',          policy:'12 days / year · medical document / doctor note is mandatory' },
+  { value:'marriage',   label:'Marriage Leave',      policy:'One-time entitlement of 5 days' },
+  { value:'maternity',  label:'Maternity Leave',     policy:'One-time entitlement of up to 90 days (3 months)' },
+  { value:'comp_off',   label:'Comp Off',            policy:'Earned by working on holidays / weekends · granted by HR' },
+  { value:'permission', label:'Permission (Hourly)', policy:'Short hourly permission · calculated as fraction of a day' },
+  { value:'unpaid',     label:'Unpaid Leave',        policy:'Leave without pay · no balance required' },
 ];
 
 const TYPE_LABELS = Object.fromEntries(LEAVE_TYPES.map(t => [t.value, t.label]));
@@ -44,14 +44,62 @@ function TlStatusPill({ leave }) {
   return null;
 }
 
+// Maps leave type to the user balance field name
+const BALANCE_KEYS = {
+  casual:   'casual_leave_balance',
+  sick:     'sick_leave_balance',
+  comp_off: 'comp_off_balance',
+  marriage: 'marriage_leave_balance',
+  maternity:'maternity_leave_balance',
+};
+
+// Human-friendly balance labels
+const BALANCE_LABELS = {
+  casual:   'Personal Leave',
+  sick:     'Sick Leave',
+  comp_off: 'Comp Off',
+  marriage: 'Marriage Leave',
+  maternity:'Maternity Leave',
+};
+
+function BalancePill({ type, user }) {
+  const key = BALANCE_KEYS[type];
+  if (!key || !user) return null;
+  const balance = parseFloat(user[key] ?? 0);
+  const low  = balance <= 2;
+  const zero = balance <= 0;
+  const color = zero ? '#F87171' : low ? '#FBBF24' : '#34D399';
+  const bg    = zero ? 'rgba(248,113,113,0.1)' : low ? 'rgba(251,191,36,0.1)' : 'rgba(52,211,153,0.1)';
+  const bd    = zero ? 'rgba(248,113,113,0.3)' : low ? 'rgba(251,191,36,0.3)' : 'rgba(52,211,153,0.3)';
+  return (
+    <div style={{ display:'inline-flex', alignItems:'center', gap:'6px', marginTop:'7px', padding:'5px 12px', borderRadius:'20px', background:bg, border:`1px solid ${bd}` }}>
+      <div style={{ width:'6px', height:'6px', borderRadius:'50%', background:color }} />
+      <span style={{ fontSize:'12px', fontWeight:700, color }}>
+        {balance} day{balance !== 1 ? 's' : ''} available
+      </span>
+      <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)' }}>· {BALANCE_LABELS[type]}</span>
+    </div>
+  );
+}
+
 function ApplyLeaveModal({ onClose }) {
   const qc = useQueryClient();
-  const [form, setForm] = useState({ type:'casual', start_date:'', end_date:'', start_time:'', end_time:'', reason:'', document_note:'' });
+  const fileRef = useRef(null);
+  const [form, setForm]     = useState({ type:'casual', start_date:'', end_date:'', start_time:'', end_time:'', reason:'' });
+  const [sickFile, setSickFile] = useState(null);
   const isPermission = form.type === 'permission';
   const isSick       = form.type === 'sick';
   const f = (k) => (e) => setForm({ ...form, [k]: e.target.value });
 
   const selectedType = LEAVE_TYPES.find(t => t.value === form.type);
+
+  // Fetch current user data for balance display
+  const { data: meData } = useQuery({
+    queryKey: ['auth-me-modal'],
+    queryFn: authApi.me,
+    staleTime: 30000,
+  });
+  const me = meData?.user ?? meData;
 
   const apply = useMutation({
     mutationFn: leaveApi.apply,
@@ -59,10 +107,48 @@ function ApplyLeaveModal({ onClose }) {
       toast.success('Leave request submitted — your TL will be notified');
       qc.invalidateQueries(['my-leaves']);
       qc.invalidateQueries(['dashboard-stats']);
+      qc.invalidateQueries(['auth-me-modal']);
       onClose();
     },
-    onError: (e) => toast.error(e.message),
+    onError: (e) => toast.error(e.response?.data?.message || e.message),
   });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (isSick && !sickFile) {
+      toast.error('Please upload a medical certificate for sick leave');
+      return;
+    }
+    if (isSick && sickFile) {
+      const fd = new FormData();
+      Object.entries(form).forEach(([k, v]) => { if (v) fd.append(k, v); });
+      fd.append('medical_cert', sickFile);
+      apply.mutate(fd);
+    } else {
+      apply.mutate(form);
+    }
+  };
+
+  const handleFileChange = (e) => {
+    const file = e.target.files?.[0] || null;
+    setSickFile(file);
+  };
+
+  const clearFile = () => {
+    setSickFile(null);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+
+  // When switching away from sick, clear the file
+  const handleTypeChange = (e) => {
+    setForm({ ...form, type: e.target.value });
+    if (e.target.value !== 'sick') {
+      setSickFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+    }
+  };
+
+  const fmt = (bytes) => bytes < 1024*1024 ? `${(bytes/1024).toFixed(1)} KB` : `${(bytes/(1024*1024)).toFixed(1)} MB`;
 
   return (
     <div style={{ position:'fixed', inset:0, zIndex:50, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(4,7,18,0.8)', backdropFilter:'blur(8px)' }}>
@@ -87,21 +173,22 @@ function ApplyLeaveModal({ onClose }) {
           </button>
         </div>
 
-        <form onSubmit={(e) => { e.preventDefault(); apply.mutate(form); }} style={{ padding:'24px', display:'flex', flexDirection:'column', gap:'18px' }}>
+        <form onSubmit={handleSubmit} style={{ padding:'24px', display:'flex', flexDirection:'column', gap:'18px' }}>
 
           {/* Leave type */}
           <div>
             <label style={S.label}>Leave Type</label>
-            <select value={form.type} onChange={f('type')} style={S.input} onFocus={onFocus} onBlur={onBlur}>
-              {LEAVE_TYPES.map(({ value, label, policy }) => (
-                <option key={value} value={value} style={{ background:'#0D1117' }}>
-                  {label}{policy ? ` — ${policy}` : ''}
-                </option>
+            <select value={form.type} onChange={handleTypeChange} style={S.input} onFocus={onFocus} onBlur={onBlur}>
+              {LEAVE_TYPES.map(({ value, label }) => (
+                <option key={value} value={value} style={{ background:'#0D1117' }}>{label}</option>
               ))}
             </select>
+            {/* Balance pill for types that have a balance */}
+            <BalancePill type={form.type} user={me} />
+            {/* Policy note */}
             {selectedType?.policy && (
-              <p style={{ fontSize:'11px', color:'rgba(244,114,182,0.7)', marginTop:'5px' }}>
-                📋 Policy: {selectedType.policy}
+              <p style={{ fontSize:'11px', color:'rgba(244,114,182,0.6)', marginTop:'5px' }}>
+                📋 {selectedType.policy}
               </p>
             )}
           </div>
@@ -143,19 +230,46 @@ function ApplyLeaveModal({ onClose }) {
               onFocus={onFocus} onBlur={onBlur} />
           </div>
 
-          {/* Document note — only for sick leave */}
+          {/* Medical certificate upload — sick leave only */}
           {isSick && (
-            <div style={{ background:'rgba(251,191,36,0.06)', border:'1px solid rgba(251,191,36,0.2)', borderRadius:'12px', padding:'14px' }}>
-              <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'10px' }}>
-                <FileText size={14} color="#FBBF24" />
-                <span style={{ fontSize:'12px', fontWeight:700, color:'#FBBF24' }}>Medical Document Required</span>
+            <div style={{ background:'rgba(251,191,36,0.06)', border:`1px solid ${sickFile ? 'rgba(52,211,153,0.35)' : 'rgba(251,191,36,0.25)'}`, borderRadius:'12px', padding:'14px', transition:'border-color 0.2s' }}>
+              <div style={{ display:'flex', alignItems:'center', gap:'7px', marginBottom:'12px' }}>
+                <FileText size={14} color={sickFile ? '#34D399' : '#FBBF24'} />
+                <span style={{ fontSize:'12px', fontWeight:700, color: sickFile ? '#34D399' : '#FBBF24' }}>
+                  Medical Certificate Required
+                </span>
+                <span style={{ fontSize:'10px', color:'rgba(241,245,249,0.3)', marginLeft:'auto' }}>PDF, JPG or PNG · max 5 MB</span>
               </div>
-              <label style={{ ...S.label, color:'rgba(251,191,36,0.7)' }}>Document / Doctor Note</label>
-              <textarea rows={2} value={form.document_note} onChange={f('document_note')}
-                placeholder="e.g. Doctor's certificate from City Hospital, dated 24 May 2026…"
-                style={{ ...S.input, resize:'none', lineHeight:1.6, borderColor:'rgba(251,191,36,0.3)' }}
-                onFocus={e => { e.target.style.borderColor='rgba(251,191,36,0.6)'; e.target.style.boxShadow='0 0 0 3px rgba(251,191,36,0.08)'; }}
-                onBlur={e => { e.target.style.borderColor='rgba(251,191,36,0.3)'; e.target.style.boxShadow='none'; }} />
+
+              {!sickFile ? (
+                /* Drop zone / file picker */
+                <label style={{ display:'flex', flexDirection:'column', alignItems:'center', justifyContent:'center', gap:'8px', padding:'20px', borderRadius:'10px', border:'1.5px dashed rgba(251,191,36,0.35)', cursor:'pointer', transition:'all 0.15s' }}
+                  onMouseEnter={e => { e.currentTarget.style.background='rgba(251,191,36,0.05)'; e.currentTarget.style.borderColor='rgba(251,191,36,0.6)'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background='transparent'; e.currentTarget.style.borderColor='rgba(251,191,36,0.35)'; }}>
+                  <Upload size={20} color="rgba(251,191,36,0.7)" />
+                  <span style={{ fontSize:'12px', color:'rgba(251,191,36,0.8)', fontWeight:600 }}>Click to upload medical certificate</span>
+                  <span style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)' }}>or drag and drop</span>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={handleFileChange}
+                    style={{ display:'none' }}
+                  />
+                </label>
+              ) : (
+                /* File preview */
+                <div style={{ display:'flex', alignItems:'center', gap:'10px', padding:'10px 14px', borderRadius:'10px', background:'rgba(52,211,153,0.07)', border:'1px solid rgba(52,211,153,0.2)' }}>
+                  <CheckCircle size={16} color="#34D399" />
+                  <div style={{ flex:1, minWidth:0 }}>
+                    <p style={{ fontSize:'12px', fontWeight:600, color:'#F1F5F9', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{sickFile.name}</p>
+                    <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)', marginTop:'2px' }}>{fmt(sickFile.size)}</p>
+                  </div>
+                  <button type="button" onClick={clearFile} style={{ background:'rgba(248,113,113,0.12)', border:'1px solid rgba(248,113,113,0.25)', borderRadius:'6px', cursor:'pointer', color:'#F87171', padding:'4px 8px', fontSize:'11px', fontWeight:600 }}>
+                    Remove
+                  </button>
+                </div>
+              )}
             </div>
           )}
 

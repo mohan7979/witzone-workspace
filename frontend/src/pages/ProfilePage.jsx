@@ -4,7 +4,7 @@ import { authApi } from '@/api';
 import useAuthStore from '@/store/authStore';
 import {
   User, Mail, Phone, Briefcase, Building2, Clock, Shield,
-  IdCard, Edit3, Check, X, KeyRound, Eye, EyeOff, Lock,
+  IdCard, Edit3, Check, X, KeyRound, Eye, EyeOff, Lock, Home,
 } from 'lucide-react';
 
 const ACCENT = '#818CF8'; // indigo
@@ -285,6 +285,11 @@ export default function ProfilePage() {
             <InfoRow icon={Briefcase} label="Designation"  value={user?.designation} />
             <InfoRow icon={Shield}    label="Role"         value={user?.role ? user.role.charAt(0).toUpperCase() + user.role.slice(1) : '—'} />
             <InfoRow icon={User}      label="Manager"      value={user?.manager ? `${user.manager.first_name} ${user.manager.last_name}` : '—'} />
+            <InfoRow icon={Home}      label="Work Mode"    value={
+              user?.work_mode === 'wfh'
+                ? '🏠 Work From Home (WFH)'
+                : '🏢 Work From Office (WFO)'
+            } />
           </div>
 
           {/* Shift Info */}
@@ -299,12 +304,14 @@ export default function ProfilePage() {
             {/* Leave balance pills */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginTop: 16 }}>
               {[
-                { label: 'Casual',   val: user?.casual_leave_balance,   color: '#818CF8' },
-                { label: 'Sick',     val: user?.sick_leave_balance,     color: '#F472B6' },
-                { label: 'Comp Off', val: user?.comp_off_balance,       color: '#34D399' },
-              ].map(({ label, val, color }) => (
-                <div key={label} style={{ background: `rgba(${color === '#818CF8' ? '129,140,248' : color === '#F472B6' ? '244,114,182' : '52,211,153'},0.08)`, border: `1px solid rgba(${color === '#818CF8' ? '129,140,248' : color === '#F472B6' ? '244,114,182' : '52,211,153'},0.2)`, borderRadius: 10, padding: '10px 14px', textAlign: 'center' }}>
-                  <div style={{ color, fontSize: 24, fontWeight: 700 }}>{val ?? '—'}</div>
+                { label: 'Personal',  val: user?.casual_leave_balance,   color: '#818CF8', rgb: '129,140,248' },
+                { label: 'Sick',      val: user?.sick_leave_balance,     color: '#F472B6', rgb: '244,114,182' },
+                { label: 'Comp Off',  val: user?.comp_off_balance,       color: '#34D399', rgb: '52,211,153'  },
+                { label: 'Marriage',  val: user?.marriage_leave_balance, color: '#F9A8D4', rgb: '249,168,212' },
+                { label: 'Maternity', val: user?.maternity_leave_balance,color: '#86EFAC', rgb: '134,239,172' },
+              ].map(({ label, val, color, rgb }) => (
+                <div key={label} style={{ background: `rgba(${rgb},0.08)`, border: `1px solid rgba(${rgb},0.2)`, borderRadius: 10, padding: '10px 14px', textAlign: 'center' }}>
+                  <div style={{ color, fontSize: 22, fontWeight: 700 }}>{parseFloat(val) ?? '—'}</div>
                   <div style={{ color: '#64748B', fontSize: 11, marginTop: 2 }}>{label}</div>
                 </div>
               ))}

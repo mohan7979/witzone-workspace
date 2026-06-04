@@ -1,47 +1,67 @@
-const moment = require('moment');
+const moment = require('moment-timezone');
 const { IdleLog, User, Attendance } = require('../models');
 const { Op, fn, col } = require('sequelize');
 const asyncHandler = require('../utils/asyncHandler');
+const { nowIST, todayIST, TZ } = require('../utils/ist');
 
 const OFFLINE_THRESHOLD_MS = 5 * 60 * 1000; // 5 min
+// An idle session at or beyond this length is flagged "long idle" for HR review.
+const LONG_IDLE_SECONDS = 30 * 60; // 30 min
+// Hard sanity ceiling: no single idle session inside one clocked-in day should
+// exceed this. Guards the aggregates against corrupt readings (machine sleep,
+// agent crash leaving a session open across a suspend, clock skew, etc.).
+const MAX_REASONABLE_IDLE_SECONDS = 12 * 60 * 60; // 12 h
 
 // Called by desktop agent every 60s.
 // Session-based idle tracking: one open row (idle_end IS NULL) = currently idle session.
 // This avoids unbounded row creation and prevents double-counting.
 exports.heartbeat = asyncHandler(async (req, res) => {
   const { idle_seconds, machine_name, agent_version } = req.body;
-  const now     = new Date();                              // always trust server time
-  const date    = moment(now).format('YYYY-MM-DD');
-  const idleSec = Math.max(0, parseInt(idle_seconds, 10) || 0);
+  const now     = nowIST().toDate();  // IST-aware JS Date
+  const date    = todayIST();         // IST date string
+  // Clamp into a sane range so a corrupt reading can't poison the day's aggregate.
+  const idleSec = Math.min(MAX_REASONABLE_IDLE_SECONDS, Math.max(0, parseInt(idle_seconds, 10) || 0));
 
-  // Heartbeats only count when the user is actively clocked in
+  // Heartbeats only count when the user is actively clocked in (session 1 OR session 2 open)
   const attendance = await Attendance.findOne({
-    where: { user_id: req.user.id, date, login_time: { [Op.ne]: null }, logout_time: null },
+    where: {
+      user_id: req.user.id,
+      date,
+      [Op.or]: [
+        { login_time: { [Op.ne]: null }, logout_time: null },      // session 1 active
+        { login_time_2: { [Op.ne]: null }, logout_time_2: null },  // session 2 active
+      ],
+    },
   });
 
   if (attendance) {
-    if (idleSec > 60) {
-      // User is idle — maintain exactly one open session
+    if (attendance.on_break) {
+      // ── On break: idle MUST NOT run. Close any accidentally open idle session.
+      await IdleLog.update(
+        { idle_end: now },
+        { where: { user_id: req.user.id, date, idle_end: null } }
+      );
+      // Do not open new idle sessions while on break.
+    } else if (idleSec > 60) {
+      // ── User is idle (desktop idle detected, not on break)
       const openSession = await IdleLog.findOne({
         where: { user_id: req.user.id, date, idle_end: null },
       });
       if (openSession) {
-        // Extend the running session with the latest idle duration from the agent
         await openSession.update({ idle_seconds: idleSec, machine_name, agent_version });
       } else {
-        // New idle session started — back-compute the start time
         await IdleLog.create({
           user_id:      req.user.id,
           date,
           idle_start:   new Date(now - idleSec * 1000),
-          idle_end:     null,     // open = currently idle
+          idle_end:     null,
           idle_seconds: idleSec,
           machine_name,
           agent_version,
         });
       }
     } else {
-      // User is active — close any open idle session
+      // ── User is active — close any open idle session
       await IdleLog.update(
         { idle_end: now },
         { where: { user_id: req.user.id, date, idle_end: null } }
@@ -61,26 +81,34 @@ exports.heartbeat = asyncHandler(async (req, res) => {
 // Employee: idle summary for a single date
 exports.myIdleSummary = asyncHandler(async (req, res) => {
   const { date } = req.query;
-  const today = date || moment().format('YYYY-MM-DD');
+  const today = date || todayIST();
 
-  const logs = await IdleLog.findAll({
-    where: { user_id: req.user.id, date: today },
-    order: [['idle_start', 'ASC']],
-  });
+  const [logs, attendance] = await Promise.all([
+    IdleLog.findAll({
+      where: { user_id: req.user.id, date: today },
+      order: [['idle_start', 'ASC']],
+    }),
+    Attendance.findOne({ where: { user_id: req.user.id, date: today } }),
+  ]);
 
-  const totalIdleSeconds = logs.reduce((sum, l) => sum + (l.idle_seconds || 0), 0);
+  const totalIdleSeconds  = logs.reduce((sum, l) => sum + (l.idle_seconds || 0), 0);
+  const totalBreakSeconds = attendance?.total_break_seconds || 0;
+  const longIdleSessions  = logs.filter(l => (l.idle_seconds || 0) >= LONG_IDLE_SECONDS).length;
+
   res.json({
-    date:               today,
+    date:                today,
     logs,
-    total_idle_seconds: totalIdleSeconds,
-    total_idle_minutes: Math.round(totalIdleSeconds / 60),
+    total_idle_seconds:  totalIdleSeconds,
+    total_idle_minutes:  Math.round(totalIdleSeconds / 60),
+    total_break_seconds: totalBreakSeconds,
+    long_idle_sessions:  longIdleSessions,
   });
 });
 
 // HR/Lead: aggregated idle per employee for a date
 exports.teamIdleSummary = asyncHandler(async (req, res) => {
   const { date, department } = req.query;
-  const today = date || moment().format('YYYY-MM-DD');
+  const today = date || todayIST();
 
   const userWhere = { status: 'active' };
   if (department) userWhere.department = department;
@@ -102,7 +130,24 @@ exports.teamIdleSummary = asyncHandler(async (req, res) => {
     raw: false,
   });
 
-  res.json({ date: today, data: logs });
+  // Pull each user's total break duration for the day so HR sees idle AND break.
+  const userIds = logs.map(l => l.user_id).filter(Boolean);
+  const breakMap = {};
+  if (userIds.length) {
+    const atts = await Attendance.findAll({
+      where: { date: today, user_id: { [Op.in]: userIds } },
+      attributes: ['user_id', 'total_break_seconds'],
+      raw: true,
+    });
+    for (const a of atts) breakMap[a.user_id] = a.total_break_seconds || 0;
+  }
+
+  const data = logs.map((l) => {
+    const plain = l.get ? l.get({ plain: true }) : l;
+    return { ...plain, total_break_seconds: breakMap[plain.user_id] || 0 };
+  });
+
+  res.json({ date: today, data });
 });
 
 /**
@@ -114,7 +159,7 @@ exports.teamIdleSummary = asyncHandler(async (req, res) => {
  */
 exports.idleDetail = asyncHandler(async (req, res) => {
   const { user_id, date } = req.query;
-  const targetDate   = date || moment().format('YYYY-MM-DD');
+  const targetDate   = date || todayIST();
   const targetUserId = user_id || req.user.id;
 
   // Authorization checks
@@ -145,15 +190,18 @@ exports.idleDetail = asyncHandler(async (req, res) => {
   const timeline = [];
 
   if (attendance?.login_time) {
-    let cursor = moment(`${targetDate} ${attendance.login_time}`);
+    // login_time / logout_time are full timestamps — parse them directly. (Do NOT
+    // concatenate with the date string: that yields an invalid moment and silently
+    // drops every "work" segment from the timeline.)
+    let cursor = moment.tz(attendance.login_time, TZ);
     const clockOut = attendance.logout_time
-      ? moment(`${targetDate} ${attendance.logout_time}`)
-      : moment(); // treat "still clocked in" as now
+      ? moment.tz(attendance.logout_time, TZ)
+      : nowIST(); // treat "still clocked in" as now (IST)
 
     for (const session of idleSessions) {
       if (!session.idle_start) continue;
-      const idleStart = moment(session.idle_start);
-      const idleEnd   = session.idle_end ? moment(session.idle_end) : moment();
+      const idleStart = moment.tz(session.idle_start, TZ);
+      const idleEnd   = session.idle_end ? moment.tz(session.idle_end, TZ) : nowIST();
 
       // Skip sessions that started before clock-in (data integrity guard)
       if (idleStart.isBefore(cursor)) continue;
@@ -170,14 +218,17 @@ exports.idleDetail = asyncHandler(async (req, res) => {
 
       // Cap idle end at clock-out
       const cappedEnd = idleEnd.isAfter(clockOut) ? clockOut : idleEnd;
-      const idleMins  = Math.round(cappedEnd.diff(idleStart, 'minutes', true));
-      if (idleMins > 0) {
+      const idleSecs  = Math.round(cappedEnd.diff(idleStart, 'seconds', true));
+      const idleMins  = Math.round(idleSecs / 60);
+      if (idleSecs > 0) {
         timeline.push({
           type: 'idle',
           start: idleStart.toISOString(),
           end: cappedEnd.toISOString(),
           duration_minutes: idleMins,
+          duration_seconds: idleSecs,
           idle_seconds: session.idle_seconds,
+          long_idle: idleSecs >= LONG_IDLE_SECONDS,  // flag sessions ≥ 30 min for review
         });
       }
 
@@ -193,7 +244,9 @@ exports.idleDetail = asyncHandler(async (req, res) => {
     }
   }
 
-  const totalIdleSecs = idleSessions.reduce((s, l) => s + (l.idle_seconds || 0), 0);
+  const totalIdleSecs   = idleSessions.reduce((s, l) => s + (l.idle_seconds || 0), 0);
+  const longIdleCount   = timeline.filter(t => t.type === 'idle' && t.long_idle).length;
+  const totalBreakSecs  = attendance?.total_break_seconds || 0;
 
   res.json({
     date: targetDate,
@@ -201,8 +254,10 @@ exports.idleDetail = asyncHandler(async (req, res) => {
     attendance,
     idle_sessions: idleSessions,
     timeline,
-    total_idle_seconds: totalIdleSecs,
-    total_idle_minutes: Math.round(totalIdleSecs / 60),
+    total_idle_seconds:  totalIdleSecs,
+    total_idle_minutes:  Math.round(totalIdleSecs / 60),
+    total_break_seconds: totalBreakSecs,
+    long_idle_sessions:  longIdleCount,
   });
 });
 
@@ -213,9 +268,9 @@ exports.idleDetail = asyncHandler(async (req, res) => {
  *   disconnected — clocked in but no heartbeat in 5+ min
  */
 exports.liveIdleStatus = asyncHandler(async (req, res) => {
-  const now       = new Date();
+  const now       = nowIST().toDate();
   const threshold = new Date(now - OFFLINE_THRESHOLD_MS);
-  const today     = moment().format('YYYY-MM-DD');
+  const today     = todayIST();
 
   const userWhere = { status: 'active' };
   if (req.user.role === 'lead') userWhere.manager_id = req.user.id;

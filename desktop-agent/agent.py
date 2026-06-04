@@ -26,6 +26,16 @@ HEARTBEAT_INTERVAL = 60   # seconds
 STARTUP_KEY        = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME           = "WitzoneAgent"
 
+
+def resource_path(rel):
+    """Resolve a bundled resource path — works both in dev and in the
+    PyInstaller one-file build (which unpacks data into sys._MEIPASS)."""
+    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
+    return os.path.join(base, rel)
+
+
+ICON_FILE = resource_path("witzone.png")  # Witzone logo for the system-tray icon
+
 # Shared state
 last_activity = time.time()
 auth_token    = None
@@ -162,11 +172,20 @@ def heartbeat_loop():
 # ---------------------------------------------------------------------------
 
 def make_icon(authenticated=True):
-    color = "#0ea5e9" if authenticated else "#64748b"
-    img   = Image.new("RGB", (64, 64), color="#1e3a5f")
-    draw  = ImageDraw.Draw(img)
-    draw.ellipse([16, 16, 48, 48], fill=color)
-    return img
+    """System-tray icon = the Witzone logo. Dimmed when not logged in.
+    Falls back to a simple drawn circle if the bundled image is unavailable."""
+    try:
+        img = Image.open(ICON_FILE).convert("RGBA").resize((64, 64), Image.LANCZOS)
+        if not authenticated:
+            from PIL import ImageEnhance
+            img = ImageEnhance.Brightness(img).enhance(0.5)  # greyed-out until login
+        return img
+    except Exception:
+        color = "#0ea5e9" if authenticated else "#64748b"
+        img   = Image.new("RGB", (64, 64), color="#1e3a5f")
+        draw  = ImageDraw.Draw(img)
+        draw.ellipse([16, 16, 48, 48], fill=color)
+        return img
 
 
 # ---------------------------------------------------------------------------
