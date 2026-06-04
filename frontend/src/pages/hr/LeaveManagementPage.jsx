@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, X, GitBranch } from 'lucide-react';
 import { leaveApi } from '@/api';
@@ -221,6 +222,17 @@ export default function LeaveManagementPage() {
     if (isHRLevel) return leave.tl_status === 'approved' || leave.tl_skipped;
     return false;
   };
+
+  // Deep link from a notification email (…/leaves?review=<id>): land on that request —
+  // open the review dialog if the user can act, otherwise the read-only workflow.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const reviewId = searchParams.get('review');
+  useEffect(() => {
+    if (!reviewId || !data?.data) return;
+    const lv = data.data.find((l) => String(l.id) === String(reviewId));
+    if (lv) { canReview(lv) ? setSelected(lv) : setDetail(lv); }
+    setSearchParams({}, { replace: true });   // consume the param so it doesn't re-fire
+  }, [reviewId, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div style={{ display:'flex', flexDirection:'column', gap:'24px', animation:'slide-up 0.4s ease' }}>

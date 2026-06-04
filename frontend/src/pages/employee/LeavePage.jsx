@@ -1,4 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Plus, X, CalendarDays, FileText, Upload, CheckCircle } from 'lucide-react';
 import { leaveApi, authApi } from '@/api';
@@ -378,6 +379,16 @@ export default function LeavePage() {
     initialSort: { key: 'createdAt', dir: 'desc' },
     pageSize: 10,
   });
+
+  // Deep link from a notification email (…/leaves?view=<id>): open that request.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const viewId = searchParams.get('view');
+  useEffect(() => {
+    if (!viewId || !data?.data) return;
+    const lv = data.data.find((l) => String(l.id) === String(viewId));
+    if (lv) setDetail(lv);
+    setSearchParams({}, { replace: true });
+  }, [viewId, data]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cancel = useMutation({
     mutationFn: leaveApi.cancel,

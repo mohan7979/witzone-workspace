@@ -54,6 +54,25 @@ const cardStyle = `
   box-shadow: 0 2px 12px rgba(0,0,0,0.08);
 `;
 
+// Base URL of the deployed app — used to deep-link recipients to the right page.
+const APP_URL = (process.env.APP_URL || 'https://hrms.witzonetech.com').replace(/\/$/, '');
+
+// A prominent call-to-action button that lands the recipient on the relevant page.
+const ctaButton = (href, label, color = '#2563eb') => `
+  <table role="presentation" cellpadding="0" cellspacing="0" style="margin:22px 0 6px">
+    <tr><td style="border-radius:10px;background:${color};">
+      <a href="${href}" target="_blank"
+         style="display:inline-block;padding:12px 26px;font-size:14px;font-weight:700;color:#ffffff;text-decoration:none;border-radius:10px;">
+        ${label} &nbsp;&rarr;
+      </a>
+    </td></tr>
+  </table>
+  <p style="font-size:11px;color:#94a3b8;margin:4px 0 0">You'll be asked to sign in if you aren't already.</p>`;
+
+// Deep links
+const reviewLink = (leave) => `${APP_URL}/leaves?review=${leave.id}`;   // approver → request in the queue
+const myLeavesLink = (leave) => `${APP_URL}/leaves?view=${leave.id}`;   // employee → their request
+
 exports.sendWelcomeEmail = (email, name, employeeId, tempPassword) =>
   send(email, 'Welcome to Witzone Workspace — Your Credentials', `
     <div style="${baseStyle}">
@@ -98,7 +117,7 @@ exports.sendTlNotificationEmail = (tlEmail, employee, leave) =>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;vertical-align:top">Reason</td><td style="color:#334155">${leave.reason}</td></tr>
         ${leave.document_note ? `<tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;vertical-align:top">Document Note</td><td style="color:#334155">${leave.document_note}</td></tr>` : ''}
       </table>
-      <p style="color:#64748b;font-size:13px">Please login to <strong>Witzone Workspace</strong> to approve or reject this request.</p>
+      ${ctaButton(reviewLink(leave), 'Review &amp; Approve / Reject', '#f59e0b')}
     </div></div>`
   );
 
@@ -119,7 +138,7 @@ exports.sendHrNotificationEmail = (hrEmail, employee, leave, tlName) =>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;vertical-align:top">Reason</td><td style="color:#334155">${leave.reason}</td></tr>
         ${leave.tl_comment ? `<tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;vertical-align:top">TL Comment</td><td style="color:#334155">${leave.tl_comment}</td></tr>` : ''}
       </table>
-      <p style="color:#64748b;font-size:13px">Please login to <strong>Witzone Workspace</strong> to give the final approval or rejection.</p>
+      ${ctaButton(reviewLink(leave), 'Review &amp; Approve / Reject', '#6366f1')}
     </div></div>`
   );
 
@@ -164,6 +183,7 @@ exports.sendLeaveNotificationEmail = (email, employee, leave, action) => {
       <p style="color:#475569">Hello <strong>${employee.first_name}</strong>,</p>
       <p style="color:#475569">${cfg.body}</p>
       ${cfg.extra}
+      ${ctaButton(myLeavesLink(leave), 'View in Witzone Workspace', cfg.color)}
     </div></div>
   `);
 };
@@ -182,6 +202,7 @@ exports.sendReviewerOutcomeEmail = (toEmail, toName, employee, leave, action, de
         (${leave.start_date} → ${leave.end_date}) that you reviewed has been
         <span style="color:${color};font-weight:700">${approved ? 'approved' : 'rejected'}</span> by ${deciderRole}.</p>
       ${leave.reviewer_comment ? `<p style="color:#64748b;font-size:13px">${deciderRole} Comment: ${leave.reviewer_comment}</p>` : ''}
+      ${ctaButton(`${APP_URL}/leaves`, 'Open Witzone Workspace', '#64748b')}
     </div></div>`
   );
 };
