@@ -203,7 +203,7 @@ def on_login(icon, item):
             return
     else:
         print("\n--- Witzone Workspace Login ---")
-        url      = input("Server URL (e.g. http://192.168.1.10:5000): ").strip()
+        url      = input("Server URL [https://hrms.witzonetech.com]: ").strip() or "https://hrms.witzonetech.com"
         email    = input("Email: ").strip()
         password = input("Password: ").strip()
 
@@ -273,7 +273,7 @@ def _windows_login_dialog():
     try:
         script = (
             'Add-Type -AssemblyName Microsoft.VisualBasic;'
-            '$url = [Microsoft.VisualBasic.Interaction]::InputBox("Server URL", "Witzone Login", "https://witzone.moksfix.com");'
+            '$url = [Microsoft.VisualBasic.Interaction]::InputBox("Server URL", "Witzone Login", "https://hrms.witzonetech.com");'
             '$email = [Microsoft.VisualBasic.Interaction]::InputBox("Email", "Witzone Login", "");'
             '$pass = [Microsoft.VisualBasic.Interaction]::InputBox("Password", "Witzone Login", "");'
             'Write-Output "$url|$email|$pass"'
