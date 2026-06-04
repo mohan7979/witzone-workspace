@@ -48,7 +48,7 @@ export default function AuditLogPage() {
 
   const tc = useTableControls(data?.data || [], {
     searchKeys: ['actor_name', 'actor_role', 'entity_label', 'action', 'new_value', 'old_value'],
-    initialSort: { key: 'created_at', dir: 'desc' },
+    initialSort: { key: 'createdAt', dir: 'desc' },
     pageSize: 15,
   });
 
@@ -80,7 +80,7 @@ export default function AuditLogPage() {
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', minWidth:'900px', borderCollapse:'collapse' }}>
             <thead><tr>
-              <SortTh label="When"         sortKey="created_at" sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="When"         sortKey="createdAt" sort={tc.sort} toggleSort={tc.toggleSort} />
               <SortTh label="Performed By" sortKey="actor_name" sort={tc.sort} toggleSort={tc.toggleSort} />
               <SortTh label="Action"       sortKey="action"     sort={tc.sort} toggleSort={tc.toggleSort} />
               <th style={S.th}>Subject</th>
@@ -94,7 +94,7 @@ export default function AuditLogPage() {
                 const decision = e.metadata?.decision;
                 return (
                   <tr key={e.id} style={{ transition:'background 0.12s' }} onMouseEnter={ev => ev.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={ev => ev.currentTarget.style.background='transparent'}>
-                    <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap', color:'rgba(241,245,249,0.5)' }}>{fmtWhen(e.created_at)}</td>
+                    <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap', color:'rgba(241,245,249,0.5)' }}>{fmtWhen(e.created_at || e.createdAt)}</td>
                     <td style={S.td}>
                       <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{e.actor_name || e.actor?.first_name ? `${e.actor?.first_name || ''} ${e.actor?.last_name || ''}`.trim() || e.actor_name : 'System'}</p>
                       <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)', textTransform:'capitalize' }}>{e.actor_role || '—'}</p>

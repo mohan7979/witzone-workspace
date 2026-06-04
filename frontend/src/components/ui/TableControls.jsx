@@ -5,6 +5,16 @@ import { Search, ChevronUp, ChevronDown, ChevronsUpDown, ChevronLeft, ChevronRig
 const getPath = (obj, path) =>
   typeof path === 'function' ? path(obj) : path.split('.').reduce((o, k) => (o == null ? o : o[k]), obj);
 
+// Collect every primitive value in a row (incl. nested objects like `user`) so the
+// search box can match against ALL columns, not just a predefined subset.
+function collectValues(obj, depth = 0, acc = []) {
+  if (obj == null || depth > 4) return acc;
+  if (typeof obj !== 'object') { acc.push(String(obj)); return acc; }
+  if (Array.isArray(obj)) { for (const v of obj) collectValues(v, depth + 1, acc); return acc; }
+  for (const k in obj) collectValues(obj[k], depth + 1, acc);
+  return acc;
+}
+
 function cmp(a, b) {
   if (a == null && b == null) return 0;
   if (a == null) return -1;
@@ -33,12 +43,12 @@ export function useTableControls(rows, { searchKeys = [], initialSort = null, pa
 
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q || !searchKeys.length) return rows || [];
-    return (rows || []).filter((r) =>
-      searchKeys.some((k) => {
-        const v = getPath(r, k);
-        return v != null && String(v).toLowerCase().includes(q);
-      }));
+    if (!q) return rows || [];
+    return (rows || []).filter((r) => {
+      // 1) explicit/derived keys (e.g. computed labels), then 2) every column value
+      if (searchKeys.some((k) => { const v = getPath(r, k); return v != null && String(v).toLowerCase().includes(q); })) return true;
+      return collectValues(r).join('  ').toLowerCase().includes(q);
+    });
   }, [rows, search, searchKeys]);
 
   const sorted = useMemo(() => {

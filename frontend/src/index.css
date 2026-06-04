@@ -70,14 +70,11 @@ input[type="time"]::-webkit-calendar-picker-indicator,
 input[type="datetime-local"]::-webkit-calendar-picker-indicator,
 input[type="month"]::-webkit-calendar-picker-indicator,
 input[type="week"]::-webkit-calendar-picker-indicator {
-  filter: invert(1) brightness(1.8);
-  opacity: 0.9;
-  cursor: pointer;
-}
-input[type="date"]::-webkit-calendar-picker-indicator:hover,
-input[type="time"]::-webkit-calendar-picker-indicator:hover,
-input[type="datetime-local"]::-webkit-calendar-picker-indicator:hover {
+  /* brightness(0) flattens the icon to black, invert(1) flips it to pure white —
+     independent of the base icon colour, so it's reliably white on the dark theme. */
+  filter: brightness(0) invert(1);
   opacity: 1;
+  cursor: pointer;
 }
 
 /* Animations */

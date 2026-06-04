@@ -33,7 +33,8 @@ const durationLabel = (leave) => {
 
 // When/who a request was raised — for "created date / created by" visibility.
 const appliedLine = (employee, leave) => {
-  const when = leave.created_at ? new Date(leave.created_at).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : '';
+  const ts = leave.createdAt || leave.created_at;
+  const when = ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : '';
   return `${employee.first_name} ${employee.last_name}${when ? ` on ${when} IST` : ''}`;
 };
 

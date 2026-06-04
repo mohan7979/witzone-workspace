@@ -41,7 +41,7 @@ export default function LeaveWorkflowModal({ leave, onClose }) {
   stages.push({
     tone: 'done', title: 'Request Submitted',
     who: `Applied by ${fullName(leave.user) || 'Employee'}`,
-    when: dt(leave.created_at),
+    when: dt(leave.createdAt || leave.created_at),
   });
 
   // 2) Team Lead stage

@@ -374,8 +374,8 @@ export default function LeavePage() {
   });
 
   const tc = useTableControls(data?.data || [], {
-    searchKeys: ['type', 'reason', 'status'],
-    initialSort: { key: 'created_at', dir: 'desc' },
+    searchKeys: ['type', 'reason', 'status', (r) => TYPE_LABELS[r.type]],
+    initialSort: { key: 'createdAt', dir: 'desc' },
     pageSize: 10,
   });
 
@@ -432,7 +432,7 @@ export default function LeavePage() {
                 <SortTh label="Type" sortKey="type" sort={tc.sort} toggleSort={tc.toggleSort} />
                 <th style={S.th}>Period</th>
                 <th style={S.th}>Duration</th>
-                <SortTh label="Requested" sortKey="created_at" sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="Requested" sortKey="createdAt" sort={tc.sort} toggleSort={tc.toggleSort} />
                 <SortTh label="TL / HR Status" sortKey="status" sort={tc.sort} toggleSort={tc.toggleSort} />
                 <th style={S.th}>Remarks</th>
                 <th style={S.th}></th>
@@ -458,7 +458,7 @@ export default function LeavePage() {
                     {formatDate(leave.start_date)}{leave.start_date !== leave.end_date ? ` — ${formatDate(leave.end_date)}` : ''}
                   </td>
                   <td style={{ ...S.td, fontWeight:700, color:'#F1F5F9', whiteSpace:'nowrap' }}>{leaveDurationLabel(leave)}</td>
-                  <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap', color:'rgba(241,245,249,0.45)' }}>{formatDate(leave.created_at)}</td>
+                  <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap', color:'rgba(241,245,249,0.45)' }}>{formatDate(leave.createdAt || leave.created_at)}</td>
                   <td style={S.td}>
                     <div style={{ display:'flex', flexDirection:'column', gap:'4px' }}>
                       <Badge status={leave.status} />

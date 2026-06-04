@@ -201,8 +201,8 @@ export default function LeaveManagementPage() {
   });
 
   const tc = useTableControls(data?.data || [], {
-    searchKeys: ['user.first_name', 'user.last_name', 'user.department', 'type', 'reason'],
-    initialSort: { key: 'created_at', dir: 'desc' },
+    searchKeys: ['user.first_name', 'user.last_name', 'user.department', 'type', 'reason', (r) => TYPE_LABELS[r.type]],
+    initialSort: { key: 'createdAt', dir: 'desc' },
     pageSize: 12,
   });
 
@@ -266,7 +266,7 @@ export default function LeaveManagementPage() {
                 <th style={S.th}>Period</th>
                 <th style={S.th}>Duration</th>
                 <th style={S.th}>Reason</th>
-                <SortTh label="Applied"  sortKey="created_at"     sort={tc.sort} toggleSort={tc.toggleSort} />
+                <SortTh label="Applied"  sortKey="createdAt"      sort={tc.sort} toggleSort={tc.toggleSort} />
                 <th style={S.th}>TL Status</th>
                 {isHRLevel && <th style={S.th}>TL Reviewer</th>}
                 <SortTh label="Current Status" sortKey="status"   sort={tc.sort} toggleSort={tc.toggleSort} />
@@ -310,7 +310,7 @@ export default function LeaveManagementPage() {
                     {leave.reason}
                   </td>
                   <td style={{ ...S.td, fontSize:'12px', color:'rgba(241,245,249,0.35)', whiteSpace:'nowrap' }}>
-                    {formatDate(leave.created_at)}
+                    {formatDate(leave.createdAt || leave.created_at)}
                   </td>
 
                   {/* TL Status */}
