@@ -434,7 +434,7 @@ export default function LeavePage() {
                 <th style={S.th}>Duration</th>
                 <SortTh label="Requested" sortKey="createdAt" sort={tc.sort} toggleSort={tc.toggleSort} />
                 <SortTh label="TL / HR Status" sortKey="status" sort={tc.sort} toggleSort={tc.toggleSort} />
-                <th style={S.th}>Remarks</th>
+                <th style={S.th}>Reason / Remarks</th>
                 <th style={S.th}></th>
               </tr>
             </thead>
@@ -465,8 +465,15 @@ export default function LeavePage() {
                       <TlStatusPill leave={leave} />
                     </div>
                   </td>
-                  <td style={{ ...S.td, color:'rgba(241,245,249,0.3)', maxWidth:'160px', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
-                    {leave.reviewer_comment || leave.tl_comment || '—'}
+                  <td style={{ ...S.td, maxWidth:'220px' }}>
+                    <div style={{ color:'rgba(241,245,249,0.75)', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                      {leave.reason || '—'}
+                    </div>
+                    {(leave.reviewer_comment || leave.tl_comment) && (
+                      <div style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)', marginTop:'3px', fontStyle:'italic', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>
+                        ↳ {leave.reviewer_comment || leave.tl_comment}
+                      </div>
+                    )}
                   </td>
                   <td style={S.td}>
                     {leave.status === 'pending' && (
