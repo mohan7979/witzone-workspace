@@ -1,12 +1,18 @@
 const nodemailer = require('nodemailer');
 const { LEAVE_POLICY } = require('./leavePolicy');
 
+const SMTP_PORT = parseInt(process.env.SMTP_PORT || '587', 10);
 const transporter = nodemailer.createTransport({
   host: process.env.SMTP_HOST,
-  port: parseInt(process.env.SMTP_PORT || '587'),
-  secure: false,
+  port: SMTP_PORT,
+  secure: SMTP_PORT === 465,          // 465 = implicit SSL; 587 = STARTTLS
+  requireTLS: SMTP_PORT !== 465,       // enforce STARTTLS on 587 (required by Office 365)
   auth: { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS },
+  tls: { minVersion: 'TLSv1.2' },
 });
+
+// Expose verify so we can health-check the SMTP config without sending mail.
+exports.verifyTransport = () => transporter.verify();
 
 const send = (to, subject, html) =>
   transporter.sendMail({ from: process.env.EMAIL_FROM, to, subject, html });
