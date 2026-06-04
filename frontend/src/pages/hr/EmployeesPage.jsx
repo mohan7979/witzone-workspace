@@ -6,6 +6,7 @@ import Badge from '@/components/ui/Badge';
 import MasterDataFields from '@/components/hr/MasterDataFields';
 import EmployeeDetailsModal from '@/components/hr/EmployeeDetailsModal';
 import { useTableControls, SortTh, Pagination } from '@/components/ui/TableControls';
+import useAuthStore from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 const ROLE_LABEL = { hr: 'HR Admin', lead: 'Team Lead', employee: 'Employee' };
@@ -106,6 +107,12 @@ function CreateUserModal({ onClose }) {
   const [showLeaves, setShowLeaves] = useState(false);
   const isMarried = form.marital_status === 'married';
 
+  // Delegation hierarchy: only a Superuser can create HR; HR can create up to Lead.
+  const { user: me } = useAuthStore();
+  const roleOptions = me?.role === 'superuser'
+    ? [['employee', 'Employee'], ['lead', 'Team Lead'], ['hr', 'HR Admin']]
+    : [['employee', 'Employee'], ['lead', 'Team Lead']];
+
   const fv = (k) => (e) => {
     const val = e.target.value;
     if (k === 'department') setForm(f => ({ ...f, department: val, designation: '' }));
@@ -179,9 +186,9 @@ function CreateUserModal({ onClose }) {
             <div>
               <label style={S.label}>Role</label>
               <select value={form.role} onChange={fv('role')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
-                <option value="employee" style={{ background:'#0D1117' }}>Employee</option>
-                <option value="lead"     style={{ background:'#0D1117' }}>Team Lead</option>
-                <option value="hr"       style={{ background:'#0D1117' }}>HR Admin</option>
+                {roleOptions.map(([v, l]) => (
+                  <option key={v} value={v} style={{ background:'#0D1117' }}>{l}</option>
+                ))}
               </select>
             </div>
             <div>

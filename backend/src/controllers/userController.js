@@ -26,6 +26,14 @@ const LEAVE_BALANCE_FIELDS = [
   'marriage_leave_balance', 'maternity_leave_balance', 'long_leave_balance',
 ];
 
+// Role-creation hierarchy — which roles each creator may assign:
+//   Superuser → Employee, Team Lead, HR        HR → Employee, Team Lead
+// (Lead/Employee can't reach the create endpoint at all.)
+const ROLE_CREATE_MATRIX = {
+  superuser: ['employee', 'lead', 'hr'],
+  hr:        ['employee', 'lead'],
+};
+
 function pickMasterFields(body) {
   const out = {};
   for (const f of MASTER_FIELDS) {
@@ -54,6 +62,13 @@ exports.createUser = asyncHandler(async (req, res) => {
 
   if (!employee_id || !first_name || !last_name || !email || !role)
     return res.status(400).json({ message: 'employee_id, first_name, last_name, email and role are required' });
+
+  // Delegation hierarchy: HR may create Employee/Lead; only Superuser may create HR.
+  const creatable = ROLE_CREATE_MATRIX[req.user.role] || [];
+  if (!creatable.includes(role))
+    return res.status(403).json({
+      message: `As ${req.user.role.toUpperCase()}, you can create only: ${creatable.map(r => r.toUpperCase()).join(', ') || 'no roles'}.`,
+    });
 
   const emailExists = await User.findOne({ where: { email } });
   if (emailExists) return res.status(409).json({ message: 'A user with this email already exists' });
@@ -145,6 +160,16 @@ exports.updateUser = asyncHandler(async (req, res) => {
   // Snapshot fields we audit BEFORE mutating.
   const prevWorkMode = user.work_mode;
   const prevRole     = user.role;
+
+  // Same delegation hierarchy applies to role promotions via edit:
+  // HR cannot promote anyone to HR/Superuser — only a Superuser can.
+  if (updates.role && updates.role !== prevRole) {
+    const creatable = ROLE_CREATE_MATRIX[req.user.role] || [];
+    if (!creatable.includes(updates.role))
+      return res.status(403).json({
+        message: `As ${req.user.role.toUpperCase()}, you cannot set a user's role to ${updates.role.toUpperCase()}.`,
+      });
+  }
 
   // If work_mode is being changed and personal leave balance wasn't explicitly set,
   // auto-adjust the personal leave balance to the new mode's default
