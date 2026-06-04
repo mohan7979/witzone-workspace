@@ -11,13 +11,14 @@ const asyncHandler = require('../utils/asyncHandler');
 const { LEAVE_POLICY, computeAnnualReset } = require('../utils/leavePolicy');
 const { recordAudit } = require('../utils/audit');
 
+// Leave types that draw down a balance. Long Leave is intentionally NOT here:
+// it's for emergencies, so it's applied without any count restriction (like Unpaid).
 const LEAVE_BALANCE_FIELDS = {
   casual:     'casual_leave_balance',
   sick:       'sick_leave_balance',
   comp_off:   'comp_off_balance',
   marriage:   'marriage_leave_balance',
   maternity:  'maternity_leave_balance',
-  long_leave: 'long_leave_balance',
 };
 
 const VALID_TYPES = Object.keys(LEAVE_POLICY);

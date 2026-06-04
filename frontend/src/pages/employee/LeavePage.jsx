@@ -30,7 +30,7 @@ const LEAVE_TYPES = [
   { value:'marriage',   label:'Marriage Leave',      policy:'One-time entitlement of 5 days' },
   { value:'maternity',  label:'Maternity Leave',     policy:'One-time entitlement of up to 90 days (3 months)' },
   { value:'comp_off',   label:'Comp Off',            policy:'Earned by working on holidays / weekends · granted by HR' },
-  { value:'long_leave', label:'Long Leave',          policy:'Extended leave · balance allocated by HR' },
+  { value:'long_leave', label:'Long Leave',          policy:'Emergency leave · no count restriction — apply any time' },
   { value:'permission', label:'Permission (Hourly)', policy:'Short hourly permission · entered and shown in hours' },
   { value:'unpaid',     label:'Unpaid Leave',        policy:'Leave without pay · no balance required' },
 ];
@@ -51,14 +51,14 @@ function TlStatusPill({ leave }) {
   return null;
 }
 
-// Maps leave type to the user balance field name
+// Maps leave type to the user balance field name.
+// long_leave is intentionally absent — it's emergency leave with no balance gate.
 const BALANCE_KEYS = {
   casual:     'casual_leave_balance',
   sick:       'sick_leave_balance',
   comp_off:   'comp_off_balance',
   marriage:   'marriage_leave_balance',
   maternity:  'maternity_leave_balance',
-  long_leave: 'long_leave_balance',
 };
 
 // Human-friendly balance labels

@@ -279,7 +279,6 @@ function CreateUserModal({ onClose }) {
                     ['casual_leave_balance', `Claimed Leave (default ${form.work_mode === 'wfh' ? 8 : 12})`],
                     ['sick_leave_balance',   'Sick Leave (default 12)'],
                     ['comp_off_balance',     'Comp Off (default 0)'],
-                    ['long_leave_balance',   'Long Leave (default 0)'],
                     ['marriage_leave_balance','Marriage Leave (default 5)'],
                     ...(isMarried ? [['maternity_leave_balance', 'Maternity Leave (default 90)']] : []),
                   ].map(([k, label]) => (

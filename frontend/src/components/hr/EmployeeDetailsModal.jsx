@@ -17,11 +17,12 @@ const blurStyle  = (e) => { e.target.style.borderColor='rgba(255,255,255,0.1)'; 
 // Editable profile fields (the rest of the master data comes from MasterDataFields).
 const PROFILE_FIELDS = ['first_name','last_name','phone','dob','doj'];
 // HR-editable leave allocation. Maternity is shown only for married employees.
+// Long Leave is emergency leave with no count restriction, so it's not an
+// allocatable balance here.
 const LEAVE_FIELDS = [
   ['casual_leave_balance',   'Claimed Leave'],
   ['sick_leave_balance',     'Sick Leave'],
   ['comp_off_balance',       'Comp Off'],
-  ['long_leave_balance',     'Long Leave'],
   ['marriage_leave_balance', 'Marriage Leave'],
   ['maternity_leave_balance','Maternity Leave'],
 ];

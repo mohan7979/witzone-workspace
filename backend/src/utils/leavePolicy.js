@@ -38,11 +38,12 @@ const LEAVE_POLICY = {
   },
   long_leave: {
     label:            'Long Leave',
-    annual_days:      null,     // HR-allocated, not an annual entitlement
+    annual_days:      null,
     carry_forward:    false,
     requires_document:false,
     max_at_once:      null,
-    description:      'Extended leave. Balance is allocated by HR.',
+    no_balance_limit: true,     // emergency leave — applied without a count restriction
+    description:      'Emergency leave. No count restriction — apply any time.',
     color:            '#38BDF8',
   },
   marriage: {
