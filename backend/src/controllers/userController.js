@@ -34,6 +34,17 @@ const ROLE_CREATE_MATRIX = {
   hr:        ['employee', 'lead'],
 };
 
+const ROLE_LABELS = { employee: 'Employee', lead: 'Team Lead', hr: 'HR', superuser: 'Superuser' };
+
+// Which target roles an actor may view/manage:
+//   Superuser → everyone        HR → Employees & Team Leads only
+//   (Leads are additionally restricted to their own team — handled per-endpoint.)
+function canManageRole(actorRole, targetRole) {
+  if (actorRole === 'superuser') return true;
+  if (actorRole === 'hr') return targetRole === 'employee' || targetRole === 'lead';
+  return false;
+}
+
 function pickMasterFields(body) {
   const out = {};
   for (const f of MASTER_FIELDS) {
@@ -113,7 +124,13 @@ exports.listUsers = asyncHandler(async (req, res) => {
   if (status) where.status = status;
   if (role)   where.role = role;
   if (department) where.department = department;
+  // Authority scoping:
+  //   Lead → only their own team members
+  //   HR   → only Employees & Team Leads (never other HR / Superuser accounts)
   if (req.user.role === 'lead') where.manager_id = req.user.id;
+  if (req.user.role === 'hr') {
+    where.role = (role && ['employee', 'lead'].includes(role)) ? role : { [Op.in]: ['employee', 'lead'] };
+  }
   if (search) {
     where[Op.or] = [
       { first_name:  { [Op.like]: `%${search}%` } },
@@ -144,6 +161,15 @@ exports.getUser = asyncHandler(async (req, res) => {
     ],
   });
   if (!user) return res.status(404).json({ message: 'User not found' });
+
+  // Authority scoping for single-record access.
+  const isSelf = String(user.id) === String(req.user.id);
+  if (!isSelf) {
+    if (req.user.role === 'lead' && String(user.manager_id) !== String(req.user.id))
+      return res.status(403).json({ message: 'Access denied — this employee is not in your team' });
+    if (req.user.role === 'hr' && !canManageRole('hr', user.role))
+      return res.status(403).json({ message: 'Access denied — you can only view Employees and Team Leads' });
+  }
   res.json({ user });
 });
 
@@ -159,6 +185,10 @@ exports.updateUser = asyncHandler(async (req, res) => {
 
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
+
+  // Authority: HR may edit only Employees & Team Leads, never HR/Superuser records.
+  if (!canManageRole(req.user.role, user.role))
+    return res.status(403).json({ message: `You don't have permission to edit a ${ROLE_LABELS[user.role] || user.role} account.` });
 
   // Snapshot fields we audit BEFORE mutating.
   const prevWorkMode = user.work_mode;
@@ -215,6 +245,8 @@ exports.changeWorkMode = asyncHandler(async (req, res) => {
 
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
+  if (!canManageRole(req.user.role, user.role))
+    return res.status(403).json({ message: `You don't have permission to manage a ${ROLE_LABELS[user.role] || user.role} account.` });
 
   const prevWorkMode = user.work_mode;
   if (prevWorkMode === work_mode)
@@ -250,6 +282,8 @@ exports.grantCompOff = asyncHandler(async (req, res) => {
 
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
+  if (!canManageRole(req.user.role, user.role))
+    return res.status(403).json({ message: `You don't have permission to manage a ${ROLE_LABELS[user.role] || user.role} account.` });
   if (user.status !== 'active') return res.status(400).json({ message: 'User is not active' });
 
   const newBalance = parseFloat(user.comp_off_balance) + parseFloat(days);
@@ -260,6 +294,8 @@ exports.grantCompOff = asyncHandler(async (req, res) => {
 exports.terminateUser = asyncHandler(async (req, res) => {
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
+  if (!canManageRole(req.user.role, user.role))
+    return res.status(403).json({ message: `You don't have permission to manage a ${ROLE_LABELS[user.role] || user.role} account.` });
   if (user.status === 'inactive')
     return res.status(400).json({ message: 'User is already terminated' });
   if (String(user.id) === String(req.user.id))
@@ -272,6 +308,8 @@ exports.terminateUser = asyncHandler(async (req, res) => {
 exports.reactivateUser = asyncHandler(async (req, res) => {
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
+  if (!canManageRole(req.user.role, user.role))
+    return res.status(403).json({ message: `You don't have permission to manage a ${ROLE_LABELS[user.role] || user.role} account.` });
   if (user.status !== 'inactive')
     return res.status(400).json({ message: 'User is not terminated' });
 
