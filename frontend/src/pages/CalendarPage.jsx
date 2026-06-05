@@ -204,7 +204,10 @@ export default function CalendarPage() {
               const dateStr   = `${year}-${String(month).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
               const colIdx    = idx % 7;
               const isWeekend = WEEKEND_DAYS.has(colIdx);
-              const entry     = isWeekend ? { type:'weekend', label:'Weekend', detail:'Non-working day' } : (days[dateStr] || null);
+              const dayEntry  = days[dateStr] || null;
+              // Real data (holiday / present / leave) shows even on weekends;
+              // only fall back to the "Weekend" marker when the day has no data.
+              const entry     = dayEntry || (isWeekend ? { type:'weekend', label:'Weekend', detail:'Non-working day' } : null);
               const cfg       = entry ? TYPE_CONFIG[entry.type] : null;
               const isToday   = dateStr === todayStr;
               const rowEnd    = Math.floor(idx/7) === Math.floor((cells.length-1)/7);
@@ -228,7 +231,7 @@ export default function CalendarPage() {
                     </span>
                   </div>
 
-                  {cfg && !isWeekend && (
+                  {cfg && entry.type !== 'weekend' && (
                     <div style={{ padding:'3px 7px', borderRadius:'6px', background: cfg.bg, border:`1px solid ${cfg.border}`, display:'inline-flex', alignItems:'center', gap:'4px' }}>
                       <div style={{ width:'5px', height:'5px', borderRadius:'50%', background:cfg.dot, flexShrink:0 }} />
                       <span style={{ fontSize:'10px', fontWeight:700, color:cfg.dot, lineHeight:1, whiteSpace:'nowrap' }}>{entry.label}</span>
