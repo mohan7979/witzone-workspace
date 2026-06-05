@@ -126,14 +126,15 @@ export default function HRAttendancePage() {
           <div>
             <p style={{ fontWeight:700, color:'#FBBF24', fontSize:'14px' }}>Weekend — Non-working day</p>
             <p style={{ color:'rgba(251,191,36,0.6)', fontSize:'12px', marginTop:'2px' }}>
-              Saturday and Sunday are holidays. No attendance is recorded on {date}.
+              {date} is a weekend, so employees are off and never marked absent. Only those who actually
+              worked (emergency / overtime) are listed below.
             </p>
           </div>
         </div>
       )}
 
       {/* Table */}
-      {!isWeekend && (
+      {(
         <div style={glass}>
           <TableToolbar search={tc.search} setSearch={tc.setSearch} total={tc.total} placeholder="Search name, ID or department…" />
           <div style={{ overflowX:'auto' }}>
@@ -158,7 +159,7 @@ export default function HRAttendancePage() {
                 )}
                 {!isLoading && !tc.total && (
                   <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
-                    No {filter === 'all' ? '' : filter} records for {date}
+                    {isWeekend ? `No employees worked on ${date}` : `No ${filter === 'all' ? '' : filter} records for ${date}`}
                   </td></tr>
                 )}
                 {tc.view.map((row) => (

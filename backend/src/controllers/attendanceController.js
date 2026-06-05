@@ -321,13 +321,27 @@ exports.teamAttendance = asyncHandler(async (req, res) => {
   const today = date || todayIST();
 
   const dayOfWeek = dayOfWeekIST(today);
-  if (dayOfWeek === 0 || dayOfWeek === 6) {
-    return res.json({ date: today, total: 0, data: [], weekend: true });
-  }
+  const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6;
 
   const userWhere = { status: 'active' };
   if (department) userWhere.department = department;
   if (req.user.role === 'lead') userWhere.manager_id = req.user.id;
+
+  // Weekends are non-working days. Rather than marking everyone absent, show ONLY
+  // the employees who actually clocked in (e.g. emergency Saturday work). Others
+  // are simply off — never flagged absent.
+  if (isWeekendDay) {
+    const worked = await Attendance.findAll({
+      where: { date: today, login_time: { [Op.ne]: null } },
+      include: [{
+        model: User, as: 'user', where: userWhere,
+        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
+      }],
+    });
+    const lim = parseInt(limit);
+    const offset = (parseInt(page) - 1) * lim;
+    return res.json({ date: today, weekend: true, total: worked.length, data: worked.slice(offset, offset + lim) });
+  }
 
   const [employees, records] = await Promise.all([
     User.findAll({

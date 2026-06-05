@@ -122,6 +122,7 @@ async function countActionablePending(req) {
 
 exports.dashboardStats = asyncHandler(async (req, res) => {
   const today = moment().format('YYYY-MM-DD');
+  const isWeekend = [0, 6].includes(moment(today).day());   // Sun=0, Sat=6 → non-working
   const allActiveWhere = buildUserWhere(req);
   const userInc = [{ model: User, as: 'user', where: allActiveWhere, attributes: [] }];
 
@@ -142,7 +143,9 @@ exports.dashboardStats = asyncHandler(async (req, res) => {
   res.json({
     total_employees: totalEmployees,
     present_today:   presentToday,
-    absent_today:    Math.max(0, totalEmployees - nonAbsentToday),
+    // On weekends nobody is "absent" — it's a non-working day. Only those who
+    // actually worked (presentToday) are counted; everyone else is simply off.
+    absent_today:    isWeekend ? 0 : Math.max(0, totalEmployees - nonAbsentToday),
     on_leave_today:  onLeaveToday,
     half_day_today:  halfDayToday,
     pending_leaves:  pendingLeaves,
