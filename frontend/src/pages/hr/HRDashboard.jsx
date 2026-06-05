@@ -179,7 +179,7 @@ export default function HRDashboard() {
     { name:'Half Day', count:halfDay },
   ];
   const statValues = { total, present, absent, pending };
-  const statSubs   = { total:'Active accounts', present:`${pct}% attendance rate`, absent:`${absent} not present`, pending:'Awaiting your action' };
+  const statSubs   = { total:'Active accounts', present:`${pct}% Attendance Rate`, absent:`${absent} Not Present`, pending:'Awaiting your action' };
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'morning' : hour < 17 ? 'afternoon' : 'evening';
 
