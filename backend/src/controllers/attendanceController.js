@@ -4,6 +4,15 @@ const { Attendance, User, IdleLog, Leave, Holiday, BreakLog } = require('../mode
 const asyncHandler = require('../utils/asyncHandler');
 const { nowIST, todayIST, dayOfWeekIST, TZ } = require('../utils/ist');
 
+// Human-readable holiday-type labels (kept in sync with the Holiday ENUM).
+const HOLIDAY_TYPE_LABELS = {
+  us_national:     'US National Holiday',
+  indian_national: 'Indian National Holiday',
+  client_specific: 'Client-Specific Holiday',
+  company:         'Company Holiday',
+  optional:        'Optional Holiday',
+};
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * HELPERS
  * ───────────────────────────────────────────────────────────────────────────── */
@@ -464,7 +473,7 @@ exports.calendarView = asyncHandler(async (req, res) => {
       entry = {
         type: 'holiday',
         label: hol.name || 'Holiday',
-        detail: hol.type ? `${capitalize(hol.type)} Holiday` : 'Public Holiday',
+        detail: HOLIDAY_TYPE_LABELS[hol.type] || 'Public Holiday',
       };
     } else if (att && att.status === 'holiday') {
       entry = { type: 'holiday', label: 'Holiday', detail: att.notes || 'Public Holiday' };

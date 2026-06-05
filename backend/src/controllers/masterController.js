@@ -75,7 +75,7 @@ exports.listHolidays = asyncHandler(async (req, res) => {
 exports.createHoliday = asyncHandler(async (req, res) => {
   const { name, date, type } = req.body;
   if (!name || !date) return res.status(400).json({ message: 'Name and date are required' });
-  const holiday = await Holiday.create({ name: name.trim(), date, type: type || 'national' });
+  const holiday = await Holiday.create({ name: name.trim(), date, type: type || 'company' });
   res.status(201).json({ data: holiday });
 });
 

@@ -23,7 +23,13 @@ const TABS = [
   { key:'shifts',       label:'Shift Templates', icon:Clock3,     color:'#34D399', glow:'rgba(52,211,153,0.25)',  gradient:'linear-gradient(135deg,#10B981,#34D399)' },
 ];
 
-const HOLIDAY_TYPES = ['national','company','optional'];
+const HOLIDAY_TYPES = [
+  { value:'us_national',     label:'US National Holiday' },
+  { value:'indian_national', label:'Indian National Holiday' },
+  { value:'client_specific', label:'Client-Specific Holiday' },
+  { value:'company',         label:'Company Holiday' },
+  { value:'optional',        label:'Optional Holiday' },
+];
 
 /* ─── Inline edit row ─────────────────────────────────────── */
 function EditableRow({ fields, onSave, onCancel }) {
@@ -237,7 +243,10 @@ function HolidaysPanel({ tab }) {
   const remove = useMutation({ mutationFn: masterApi.deleteHoliday, onSuccess:() => { toast.success('Deleted'); qc.invalidateQueries(['master-holidays']); }, onError:(e) => toast.error(e.message) });
 
   const rows = data?.data || [];
-  const typeLabels = { national:'🇮🇳 National', company:'🏢 Company', optional:'📅 Optional' };
+  const typeLabels = {
+    us_national:'🇺🇸 US National Holiday', indian_national:'🇮🇳 Indian National Holiday',
+    client_specific:'🤝 Client-Specific Holiday', company:'🏢 Company Holiday', optional:'📅 Optional Holiday',
+  };
   return (
     <div style={glass}>
       <div style={{ padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.06)', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
@@ -256,7 +265,7 @@ function HolidaysPanel({ tab }) {
               fields={[
                 { key:'name', placeholder:'e.g. Republic Day' },
                 { key:'date', type:'date' },
-                { key:'type', type:'select', value:'national', options:HOLIDAY_TYPES },
+                { key:'type', type:'select', value:'company', options:HOLIDAY_TYPES },
               ]}
               onSave={(v) => create.mutate({ name:v.name, date:v.date, type:v.type })}
               onCancel={() => setAdding(false)} />
