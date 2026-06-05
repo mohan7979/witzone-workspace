@@ -1,8 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { X, Pencil, Save, IdCard } from 'lucide-react';
-import { userApi } from '@/api';
+import { userApi, masterApi } from '@/api';
 import MasterDataFields from './MasterDataFields';
+import useAuthStore from '@/store/authStore';
 import toast from 'react-hot-toast';
 
 const S = {
@@ -14,6 +15,8 @@ const S = {
 const focusStyle = (e) => { e.target.style.borderColor='rgba(129,140,248,0.6)'; e.target.style.boxShadow='0 0 0 3px rgba(99,102,241,0.12)'; };
 const blurStyle  = (e) => { e.target.style.borderColor='rgba(255,255,255,0.1)'; e.target.style.boxShadow='none'; };
 
+// Account fields (now editable, matching the Add Employee form).
+const ACCOUNT_FIELDS = ['employee_id','email','role','work_mode','department','designation','manager_id','shift_id'];
 // Editable profile fields (the rest of the master data comes from MasterDataFields).
 const PROFILE_FIELDS = ['first_name','last_name','phone','dob','doj'];
 // HR-editable leave allocation. Maternity is shown only for married employees.
@@ -40,6 +43,8 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
   const [edit, setEdit] = useState(startInEdit);
   const [form, setForm] = useState({});
 
+  const { user: me } = useAuthStore();
+
   const { data, isLoading } = useQuery({
     queryKey: ['user-detail', userId],
     queryFn: () => userApi.get(userId),
@@ -47,10 +52,25 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
   });
   const user = data?.user;
 
+  // Master data + leads for the editable Account dropdowns.
+  const { data: deptData }  = useQuery({ queryKey:['master-departments'],  queryFn:masterApi.listDepartments,  staleTime:5*60*1000 });
+  const { data: desigData } = useQuery({ queryKey:['master-designations'], queryFn:masterApi.listDesignations, staleTime:5*60*1000 });
+  const { data: shiftData } = useQuery({ queryKey:['master-shifts'],       queryFn:masterApi.listShifts,       staleTime:5*60*1000 });
+  const { data: leadsData } = useQuery({ queryKey:['users-leads'],         queryFn:() => userApi.list({ role:'lead', limit:100, status:'active' }), staleTime:5*60*1000 });
+  const departments  = (deptData?.data  || []).filter(d => d.is_active).map(d => d.name);
+  const designations = (desigData?.data || []);
+  const shifts       = (shiftData?.data || []).filter(s => s.is_active);
+  const leads        = (leadsData?.data || []).filter(l => l.id !== userId);
+
+  // Role options the editor may assign (Superuser → all incl. HR; HR → Employee/Lead),
+  // always including the employee's current role so it displays correctly.
+  const baseRoles = me?.role === 'superuser' ? ['employee','lead','hr'] : ['employee','lead'];
+  const roleOptions = baseRoles.includes(user?.role) ? baseRoles : [user?.role, ...baseRoles].filter(Boolean);
+
   useEffect(() => {
     if (user) {
       const seed = {};
-      [...PROFILE_FIELDS, ...MASTER_FIELDS].forEach((k) => { seed[k] = user[k] ?? ''; });
+      [...ACCOUNT_FIELDS, ...PROFILE_FIELDS, ...MASTER_FIELDS].forEach((k) => { seed[k] = user[k] ?? ''; });
       LEAVE_FIELDS.forEach(([k]) => { seed[k] = user[k] ?? ''; });
       setForm(seed);
     }
@@ -61,7 +81,7 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
   const save = useMutation({
     mutationFn: () => {
       const payload = {};
-      [...PROFILE_FIELDS, ...MASTER_FIELDS].forEach((k) => { payload[k] = form[k] === '' ? null : form[k]; });
+      [...ACCOUNT_FIELDS, ...PROFILE_FIELDS, ...MASTER_FIELDS].forEach((k) => { payload[k] = form[k] === '' ? null : form[k]; });
       // Leave balances → numbers (skip blanks). Maternity = married only.
       const married = form.marital_status === 'married';
       LEAVE_FIELDS.forEach(([k]) => {
@@ -114,16 +134,61 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
 
           {user && (
             <>
-              {/* Account (read-only) */}
+              {/* Account (fully editable for HR / Superuser) */}
               <div style={{ display:'flex', flexDirection:'column', gap:'12px' }}>
                 <p style={S.sectionTitle}>Account</p>
                 <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:'12px' }}>
-                  <div><label style={S.label}>Employee ID</label><div style={S.readVal}>{user.employee_id}</div></div>
-                  <div><label style={S.label}>Login Email</label><div style={S.readVal}>{user.email}</div></div>
-                  <div><label style={S.label}>Department</label><div style={S.readVal}>{user.department || '—'}</div></div>
-                  <div><label style={S.label}>Designation</label><div style={S.readVal}>{user.designation || '—'}</div></div>
-                  <div><label style={S.label}>Work Mode</label><div style={S.readVal}>{user.work_mode === 'wfh' ? 'Work From Home (WFH)' : 'Work From Office (WFO)'}</div></div>
-                  <div><label style={S.label}>Manager</label><div style={S.readVal}>{user.manager ? `${user.manager.first_name} ${user.manager.last_name}` : '—'}</div></div>
+                  <div><label style={S.label}>Employee ID</label>
+                    {edit ? <input value={form.employee_id ?? ''} onChange={onField('employee_id')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+                          : <div style={S.readVal}>{user.employee_id}</div>}
+                  </div>
+                  <div><label style={S.label}>Login Email</label>
+                    {edit ? <input type="email" value={form.email ?? ''} onChange={onField('email')} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+                          : <div style={S.readVal}>{user.email}</div>}
+                  </div>
+                  <div><label style={S.label}>Role</label>
+                    {edit ? <select value={form.role ?? ''} onChange={onField('role')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+                              {roleOptions.map((r) => <option key={r} value={r} style={{ background:'#0D1117' }}>{ROLE_LABEL[r] || r}</option>)}
+                            </select>
+                          : <div style={S.readVal}>{ROLE_LABEL[user.role] || user.role}</div>}
+                  </div>
+                  <div><label style={S.label}>Work Mode</label>
+                    {edit ? <select value={form.work_mode ?? 'wfo'} onChange={onField('work_mode')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+                              <option value="wfo" style={{ background:'#0D1117' }}>Work From Office (WFO)</option>
+                              <option value="wfh" style={{ background:'#0D1117' }}>Work From Home (WFH)</option>
+                            </select>
+                          : <div style={S.readVal}>{user.work_mode === 'wfh' ? 'Work From Home (WFH)' : 'Work From Office (WFO)'}</div>}
+                  </div>
+                  <div><label style={S.label}>Department</label>
+                    {edit ? <select value={form.department ?? ''} onChange={onField('department')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+                              <option value="" style={{ background:'#0D1117' }}>— Select —</option>
+                              {departments.map((d) => <option key={d} value={d} style={{ background:'#0D1117' }}>{d}</option>)}
+                              {form.department && !departments.includes(form.department) && <option value={form.department} style={{ background:'#0D1117' }}>{form.department}</option>}
+                            </select>
+                          : <div style={S.readVal}>{user.department || '—'}</div>}
+                  </div>
+                  <div><label style={S.label}>Designation</label>
+                    {edit ? <select value={form.designation ?? ''} onChange={onField('designation')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+                              <option value="" style={{ background:'#0D1117' }}>— Select —</option>
+                              {designations.map((d) => <option key={d.id} value={d.name} style={{ background:'#0D1117' }}>{d.name}</option>)}
+                              {form.designation && !designations.some(d => d.name === form.designation) && <option value={form.designation} style={{ background:'#0D1117' }}>{form.designation}</option>}
+                            </select>
+                          : <div style={S.readVal}>{user.designation || '—'}</div>}
+                  </div>
+                  <div><label style={S.label}>Team Lead</label>
+                    {edit ? <select value={form.manager_id ?? ''} onChange={onField('manager_id')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+                              <option value="" style={{ background:'#0D1117' }}>— None —</option>
+                              {leads.map((l) => <option key={l.id} value={l.id} style={{ background:'#0D1117' }}>{l.first_name} {l.last_name}</option>)}
+                            </select>
+                          : <div style={S.readVal}>{user.manager ? `${user.manager.first_name} ${user.manager.last_name}` : '—'}</div>}
+                  </div>
+                  <div><label style={S.label}>Shift</label>
+                    {edit ? <select value={form.shift_id ?? ''} onChange={onField('shift_id')} style={S.input} onFocus={focusStyle} onBlur={blurStyle}>
+                              <option value="" style={{ background:'#0D1117' }}>— Select —</option>
+                              {shifts.map((s) => <option key={s.id} value={s.id} style={{ background:'#0D1117' }}>{s.name} ({s.start_time?.slice(0,5)}–{s.end_time?.slice(0,5)})</option>)}
+                            </select>
+                          : <div style={S.readVal}>{user.shift ? user.shift.name : '—'}</div>}
+                  </div>
                 </div>
               </div>
 
@@ -173,7 +238,7 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
               {/* Actions */}
               {edit && (
                 <div style={{ display:'flex', gap:'12px', paddingTop:'4px' }}>
-                  <button type="button" onClick={() => { setEdit(false); const seed={}; [...PROFILE_FIELDS,...MASTER_FIELDS].forEach(k=>{seed[k]=user[k]??'';}); LEAVE_FIELDS.forEach(([k])=>{seed[k]=user[k]??'';}); setForm(seed); }} style={{ flex:1, padding:'12px', fontSize:'13px', fontWeight:600, color:'rgba(241,245,249,0.6)', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', cursor:'pointer' }}>
+                  <button type="button" onClick={() => { setEdit(false); const seed={}; [...ACCOUNT_FIELDS,...PROFILE_FIELDS,...MASTER_FIELDS].forEach(k=>{seed[k]=user[k]??'';}); LEAVE_FIELDS.forEach(([k])=>{seed[k]=user[k]??'';}); setForm(seed); }} style={{ flex:1, padding:'12px', fontSize:'13px', fontWeight:600, color:'rgba(241,245,249,0.6)', background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px', cursor:'pointer' }}>
                     Cancel
                   </button>
                   <button onClick={() => save.mutate()} disabled={save.isPending} style={{ flex:1, display:'inline-flex', alignItems:'center', justifyContent:'center', gap:'7px', padding:'12px', fontSize:'13px', fontWeight:700, color:'white', background: save.isPending ? 'rgba(139,92,246,0.5)' : 'linear-gradient(135deg,#A78BFA,#8B5CF6)', border:'none', borderRadius:'10px', cursor: save.isPending ? 'not-allowed' : 'pointer', boxShadow: save.isPending ? 'none' : '0 4px 16px rgba(139,92,246,0.4)' }}>

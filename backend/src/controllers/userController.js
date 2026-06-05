@@ -175,6 +175,7 @@ exports.getUser = asyncHandler(async (req, res) => {
 
 exports.updateUser = asyncHandler(async (req, res) => {
   const allowed = [
+    'employee_id', 'email',
     'first_name', 'last_name', 'department', 'designation', 'phone',
     'shift_id', 'role', 'status', 'manager_id', 'dob', 'doj', 'work_mode',
     ...LEAVE_BALANCE_FIELDS,
@@ -182,6 +183,9 @@ exports.updateUser = asyncHandler(async (req, res) => {
   ];
   const updates = {};
   allowed.forEach(f => { if (req.body[f] !== undefined) updates[f] = req.body[f] === '' ? null : req.body[f]; });
+  // Never null out the required identity fields (ignore blanks for these).
+  if (updates.employee_id == null) delete updates.employee_id;
+  if (updates.email == null)       delete updates.email;
 
   const user = await User.findByPk(req.params.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
@@ -189,6 +193,16 @@ exports.updateUser = asyncHandler(async (req, res) => {
   // Authority: HR may edit only Employees & Team Leads, never HR/Superuser records.
   if (!canManageRole(req.user.role, user.role))
     return res.status(403).json({ message: `You don't have permission to edit a ${ROLE_LABELS[user.role] || user.role} account.` });
+
+  // Identity uniqueness checks when email / employee ID are being changed.
+  if (updates.email && updates.email !== user.email) {
+    const dupe = await User.findOne({ where: { email: updates.email } });
+    if (dupe) return res.status(409).json({ message: 'A user with this email already exists' });
+  }
+  if (updates.employee_id && updates.employee_id !== user.employee_id) {
+    const dupe = await User.findOne({ where: { employee_id: updates.employee_id } });
+    if (dupe) return res.status(409).json({ message: 'Employee ID already in use' });
+  }
 
   // Snapshot fields we audit BEFORE mutating.
   const prevWorkMode = user.work_mode;
