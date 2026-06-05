@@ -89,7 +89,10 @@ exports.createUser = asyncHandler(async (req, res) => {
 
   const user = await User.create({
     employee_id, first_name, last_name, email, role,
-    department, designation, phone, shift_id, manager_id,
+    department, designation, phone,
+    // UUID foreign keys must be NULL when unset — an empty string violates the FK.
+    shift_id:   shift_id   || null,
+    manager_id: manager_id || null,
     dob: dob || null, doj: doj || null,
     work_mode: mode,
     casual_leave_balance: personalLeaveBalance,
