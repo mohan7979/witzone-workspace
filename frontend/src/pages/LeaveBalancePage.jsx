@@ -60,7 +60,7 @@ function SummaryCard({ label, icon: Icon, color, rgb, avg }) {
         <span style={{ color:'#94A3B8', fontSize:12 }}>{label}</span>
       </div>
       <div style={{ color:'#E2E8F0', fontSize:26, fontWeight:700 }}>{avg}</div>
-      <div style={{ color:'#64748B', fontSize:11, marginTop:2 }}>avg balance</div>
+      <div style={{ color:'#64748B', fontSize:11, marginTop:2 }}>Average balance</div>
     </div>
   );
 }
@@ -133,7 +133,7 @@ function HRView() {
     <>
       {/* Summary cards */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(5,1fr)', gap:14, marginBottom:24 }}>
-        <SummaryCard label="Personal"  icon={Umbrella}  color={TOKENS.personal.color}  rgb={TOKENS.personal.rgb}  avg={avg('casual_leave_balance')} />
+        <SummaryCard label="Claimed"   icon={Umbrella}  color={TOKENS.personal.color}  rgb={TOKENS.personal.rgb}  avg={avg('casual_leave_balance')} />
         <SummaryCard label="Sick"      icon={Heart}     color={TOKENS.sick.color}       rgb={TOKENS.sick.rgb}      avg={avg('sick_leave_balance')} />
         <SummaryCard label="Comp Off"  icon={RotateCcw} color={TOKENS.compOff.color}    rgb={TOKENS.compOff.rgb}   avg={avg('comp_off_balance')} />
         <SummaryCard label="Marriage"  icon={Gem}       color={TOKENS.marriage.color}   rgb={TOKENS.marriage.rgb}  avg={avg('marriage_leave_balance')} />
