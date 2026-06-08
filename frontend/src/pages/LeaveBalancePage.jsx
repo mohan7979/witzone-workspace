@@ -419,7 +419,9 @@ export default function LeaveBalancePage({ forceEmployee = false }) {
       <div style={{ marginBottom:28 }}>
         <h1 style={{ color:'#E2E8F0', fontSize:26, fontWeight:700, margin:0 }}>Leave Balances</h1>
         <p style={{ color:'#64748B', fontSize:14, marginTop:4 }}>
-          {isHR ? 'View and manage leave balances for all active employees' : 'Your current leave day balances'}
+          {!isHR ? 'Your current leave day balances'
+            : user?.role === 'lead' ? "View your team's leave balances"
+            : 'View and manage leave balances for all active employees'}
         </p>
       </div>
       {isHR ? <HRView /> : <EmployeeView />}

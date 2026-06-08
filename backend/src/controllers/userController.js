@@ -342,8 +342,13 @@ exports.departments = asyncHandler(async (req, res) => {
 });
 
 exports.leaveBalances = asyncHandler(async (req, res) => {
+  // Authority scoping: Lead → only their team; HR → Employees & Leads; Superuser → all.
+  const where = { status: 'active' };
+  if (req.user.role === 'lead') where.manager_id = req.user.id;
+  else if (req.user.role === 'hr') where.role = { [Op.in]: ['employee', 'lead'] };
+
   const users = await User.findAll({
-    where: { status: 'active' },
+    where,
     attributes: [
       'id', 'employee_id', 'first_name', 'last_name', 'department', 'designation', 'work_mode',
       'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
