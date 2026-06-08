@@ -1,5 +1,19 @@
-import { X, FileText, UserCircle2, CheckCircle2, XCircle, Clock3, ArrowRight } from 'lucide-react';
+import { X, FileText, Paperclip } from 'lucide-react';
 import { formatDate, formatTime, leaveTypeLabel, leaveDurationLabel } from '@/lib/utils';
+import { leaveApi } from '@/api';
+import toast from 'react-hot-toast';
+
+// Fetch the protected document with the auth header, then open the blob in a tab.
+export async function openLeaveDocument(id) {
+  try {
+    const blob = await leaveApi.document(id);
+    const url = URL.createObjectURL(blob);
+    window.open(url, '_blank', 'noopener');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  } catch {
+    toast.error('Could not open the document');
+  }
+}
 
 const dt = (x) => (x ? `${formatDate(x)} · ${formatTime(x)}` : '—');
 const fullName = (u) => (u ? `${u.first_name || ''} ${u.last_name || ''}`.trim() : '');
@@ -104,6 +118,25 @@ export default function LeaveWorkflowModal({ leave, onClose }) {
               </div>
             ))}
           </div>
+
+          {/* Attached document (e.g. sick-leave medical certificate) */}
+          {leave.document_file && (
+            <div style={{ marginBottom:'20px' }}>
+              {leave.document_note && (
+                <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.55)', marginBottom:'8px' }}>“{leave.document_note}”</p>
+              )}
+              <button onClick={() => openLeaveDocument(leave.id)} style={{
+                display:'inline-flex', alignItems:'center', gap:'7px', fontSize:'12px', fontWeight:700,
+                color:'#34D399', background:'rgba(52,211,153,0.1)', border:'1px solid rgba(52,211,153,0.3)',
+                cursor:'pointer', padding:'9px 14px', borderRadius:'9px', transition:'all 0.15s',
+              }}
+                onMouseEnter={e => e.currentTarget.style.background='rgba(52,211,153,0.18)'}
+                onMouseLeave={e => e.currentTarget.style.background='rgba(52,211,153,0.1)'}>
+                <Paperclip size={13} /> View attached document
+              </button>
+            </div>
+          )}
+
           <p style={{ fontSize:'10px', fontWeight:700, color:'rgba(241,245,249,0.3)', textTransform:'uppercase', letterSpacing:'0.8px', marginBottom:'14px' }}>Timeline</p>
           {stages.map((s, i) => <Stage key={i} {...s} last={i === stages.length - 1} />)}
         </div>

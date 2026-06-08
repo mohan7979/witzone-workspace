@@ -1,6 +1,11 @@
 const { Op }   = require('sequelize');
 const moment   = require('moment');
+const path     = require('path');
+const fs       = require('fs');
 const { Leave, User, Attendance } = require('../models');
+
+// Where medical certificates are stored (matches middleware/upload.js).
+const MEDICAL_DIR = path.join(__dirname, '../../uploads/medical');
 const {
   sendLeaveNotificationEmail,
   sendTlNotificationEmail,
@@ -376,6 +381,28 @@ exports.hrReview = asyncHandler(async (req, res) => {
       req.user.role === 'superuser' ? 'Superuser' : 'HR').catch(() => {});
   }
   res.json({ message: `Leave ${action}`, leave });
+});
+
+// ─── View the uploaded document (e.g. sick-leave medical certificate) ─────────
+// Streamed through an authorised endpoint so the requester, their TL, HR and
+// Superuser can open it — but no one else.
+exports.viewDocument = asyncHandler(async (req, res) => {
+  const leave = await Leave.findByPk(req.params.id, {
+    include: [{ model: User, as: 'user', attributes: ['id', 'manager_id'] }],
+  });
+  if (!leave || !leave.document_file)
+    return res.status(404).json({ message: 'No document attached to this request' });
+
+  const u = req.user;
+  const allowed =
+    String(leave.user_id) === String(u.id) ||           // the requester
+    u.role === 'hr' || u.role === 'superuser' ||          // HR / Superuser
+    (u.role === 'lead' && leave.user && String(leave.user.manager_id) === String(u.id)); // their TL
+  if (!allowed) return res.status(403).json({ message: 'Access denied' });
+
+  const filePath = path.join(MEDICAL_DIR, path.basename(leave.document_file));
+  if (!fs.existsSync(filePath)) return res.status(404).json({ message: 'Document file not found on server' });
+  res.sendFile(filePath);
 });
 
 // ─── Get leave policy (frontend reads this) ───────────────────────────────────

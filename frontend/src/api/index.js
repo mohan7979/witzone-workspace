@@ -28,6 +28,7 @@ export const leaveApi = {
     return api.post('/leaves', data);
   },
   myLeaves:         (params)   => api.get('/leaves/my', { params }),
+  document:         (id)       => api.get(`/leaves/${id}/document`, { responseType: 'blob' }),
   cancel:           (id)       => api.patch(`/leaves/${id}/cancel`),
   pending:          (params)   => api.get('/leaves/pending', { params }),
   tlReview:         (id, data) => api.patch(`/leaves/${id}/tl-review`, data),

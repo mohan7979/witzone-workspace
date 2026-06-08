@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, XCircle, X, GitBranch } from 'lucide-react';
+import { CheckCircle, XCircle, X, GitBranch, Paperclip } from 'lucide-react';
 import { leaveApi } from '@/api';
 import useAuthStore from '@/store/authStore';
 import { formatDate, leaveStage, leaveDurationLabel } from '@/lib/utils';
-import LeaveWorkflowModal from '@/components/LeaveWorkflowModal';
+import LeaveWorkflowModal, { openLeaveDocument } from '@/components/LeaveWorkflowModal';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 import toast from 'react-hot-toast';
 
@@ -126,6 +126,18 @@ function ReviewModal({ leave, role, onClose }) {
                 <span style={{ fontSize:'12px', color:'#F1F5F9', fontWeight:600 }}>{v}</span>
               </div>
             ))}
+            {leave.document_file && (
+              <div style={{ display:'flex', gap:'14px', marginTop:'4px' }}>
+                <span style={{ fontSize:'12px', color:'rgba(241,245,249,0.3)', width:'100px', flexShrink:0, marginTop:'5px' }}>Document</span>
+                <button onClick={() => openLeaveDocument(leave.id)} style={{
+                  display:'inline-flex', alignItems:'center', gap:'6px', fontSize:'12px', fontWeight:700,
+                  color:'#34D399', background:'rgba(52,211,153,0.1)', border:'1px solid rgba(52,211,153,0.3)',
+                  cursor:'pointer', padding:'6px 12px', borderRadius:'8px',
+                }}>
+                  <Paperclip size={12} /> View certificate
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Approval chain visual */}
