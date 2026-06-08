@@ -142,6 +142,7 @@ exports.listUsers = asyncHandler(async (req, res) => {
 
   const { count, rows } = await User.findAndCountAll({
     where,
+    attributes: { exclude: ['photo'] },   // keep the list payload light
     include: [
       { model: User, as: 'manager', attributes: ['id', 'first_name', 'last_name'] },
       { model: ShiftTemplate, as: 'shift', attributes: ['id', 'name', 'start_time', 'end_time'], required: false },

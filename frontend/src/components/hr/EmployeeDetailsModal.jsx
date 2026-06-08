@@ -223,7 +223,7 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
                       <div key={k}>
                         <label style={S.label}>{label}</label>
                         {edit
-                          ? <input type="number" min="0" step="0.5" value={form[k] ?? ''} onChange={onField(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+                          ? <input type="number" min="0" step="1" inputMode="numeric" value={form[k] ?? ''} onChange={onField(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
                           : <div style={S.readVal}>{form[k] !== '' && form[k] != null ? `${form[k]} day${parseFloat(form[k]) === 1 ? '' : 's'}` : <span style={{ color:'rgba(241,245,249,0.25)' }}>—</span>}</div>}
                       </div>
                     ))}

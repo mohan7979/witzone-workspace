@@ -1,13 +1,33 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { authApi } from '@/api';
 import useAuthStore from '@/store/authStore';
 import {
   User, Mail, Phone, Briefcase, Building2, Clock, Shield,
-  IdCard, Edit3, Check, X, KeyRound, Eye, EyeOff, Lock, Home,
+  IdCard, Edit3, Check, X, KeyRound, Eye, EyeOff, Lock, Home, Camera,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 
 const ACCENT = '#818CF8'; // indigo
+
+// Downscale an image file to a small JPEG data URL (keeps the payload tiny).
+function resizeImageToDataUrl(file, max = 256) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const scale = Math.min(1, max / Math.max(img.width, img.height));
+      const w = Math.round(img.width * scale), h = Math.round(img.height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = reject;
+    img.src = url;
+  });
+}
 
 /* ─── tiny helpers ─── */
 const glass = (extra = {}) => ({
@@ -197,9 +217,12 @@ function ChangePasswordModal({ onClose }) {
 
 /* ─── Main Page ─── */
 export default function ProfilePage() {
-  const { user: storeUser } = useAuthStore();
+  const { user: storeUser, updateUser } = useAuthStore();
   const [editOpen, setEditOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
+  const [photoBusy, setPhotoBusy] = useState(false);
+  const photoRef = useRef(null);
+  const qc = useQueryClient();
 
   const { data, isLoading } = useQuery({
     queryKey: ['me'],
@@ -208,6 +231,26 @@ export default function ProfilePage() {
   });
 
   const user = data || storeUser;
+
+  const onPhotoPick = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!file.type.startsWith('image/')) { toast.error('Please choose an image file'); return; }
+    setPhotoBusy(true);
+    try {
+      const dataUrl = await resizeImageToDataUrl(file, 256);
+      const res = await authApi.updateProfile({ photo: dataUrl });
+      const updated = res.user || res;
+      qc.setQueryData(['me'], updated);
+      updateUser(updated);                 // reflects in the sidebar avatar too
+      toast.success('Profile photo updated');
+    } catch {
+      toast.error('Could not update photo');
+    } finally {
+      setPhotoBusy(false);
+    }
+  };
 
   /* Avatar initials */
   const initials = user ? `${user.first_name?.[0] || ''}${user.last_name?.[0] || ''}`.toUpperCase() : '?';
@@ -235,9 +278,18 @@ export default function ProfilePage() {
           {/* ambient glow */}
           <div style={{ position: 'absolute', top: -40, left: '50%', transform: 'translateX(-50%)', width: 160, height: 160, background: 'rgba(129,140,248,0.12)', borderRadius: '50%', filter: 'blur(40px)', pointerEvents: 'none' }} />
 
-          {/* Avatar */}
-          <div style={{ width: 88, height: 88, borderRadius: '50%', background: avatarGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: 30, fontWeight: 700, color: '#fff', boxShadow: '0 0 0 4px rgba(129,140,248,0.2)' }}>
-            {initials}
+          {/* Avatar (photo or initials) with change-photo control */}
+          <div style={{ position: 'relative', width: 88, height: 88, margin: '0 auto 16px' }}>
+            <div style={{ width: 88, height: 88, borderRadius: '50%', background: avatarGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, fontWeight: 700, color: '#fff', boxShadow: '0 0 0 4px rgba(129,140,248,0.2)', overflow: 'hidden' }}>
+              {user?.photo
+                ? <img src={user.photo} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                : initials}
+            </div>
+            <button type="button" onClick={() => photoRef.current?.click()} disabled={photoBusy} title="Change photo"
+              style={{ position: 'absolute', bottom: 0, right: 0, width: 28, height: 28, borderRadius: '50%', background: ACCENT, border: '2px solid #0B0F1A', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: photoBusy ? 'wait' : 'pointer', boxShadow: '0 2px 8px rgba(0,0,0,0.4)' }}>
+              <Camera size={13} color="#fff" />
+            </button>
+            <input ref={photoRef} type="file" accept="image/*" onChange={onPhotoPick} style={{ display: 'none' }} />
           </div>
 
           <div style={{ color: '#E2E8F0', fontSize: 18, fontWeight: 700 }}>{user?.first_name} {user?.last_name}</div>

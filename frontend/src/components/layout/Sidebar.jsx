@@ -1,5 +1,7 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import useAuthStore from '@/store/authStore';
+import { announcementApi } from '@/api';
 import { isAdminRole } from '@/lib/utils';
 import {
   LayoutDashboard, Clock, CalendarDays, Users,
@@ -33,12 +35,12 @@ const adminCoreLinks = [
 // Personal section for HR/Lead (same as employee workspace)
 const myWorkspaceLinks = [
   { to: '/my-attendance', icon: Clock,        label: 'My Attendance',  color: '#34D399', glow: 'rgba(52,211,153,0.35)'  },
-  { to: '/my-leaves',     icon: CalendarDays, label: 'My Leaves',      color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
+  { to: '/my-leaves',     icon: CalendarDays, label: 'My Leaves & Permissions', color: '#F472B6', glow: 'rgba(244,114,182,0.35)' },
   { to: '/my-balance',    icon: TrendingUp,   label: 'My Leave Balance',color:'#38BDF8',  glow: 'rgba(56,189,248,0.35)'  },
   { to: '/calendar',      icon: CalendarRange,label: 'My Calendar',    color: '#2DD4BF', glow: 'rgba(45,212,191,0.35)'  },
 ];
 
-function NavItem({ to, icon: Icon, label, color, glow }) {
+function NavItem({ to, icon: Icon, label, color, glow, badge = 0 }) {
   return (
     <NavLink to={to} style={{ textDecoration: 'none' }}>
       {({ isActive }) => (
@@ -69,6 +71,11 @@ function NavItem({ to, icon: Icon, label, color, glow }) {
           <span style={{ fontSize: '13px', fontWeight: isActive ? 600 : 400, color: isActive ? color : 'rgba(241,245,249,0.5)', letterSpacing: '-0.1px', transition: 'color 0.2s', flex: 1 }}>
             {label}
           </span>
+          {badge > 0 && (
+            <span style={{ minWidth: '18px', height: '18px', padding: '0 5px', borderRadius: '9px', background: '#F472B6', color: '#fff', fontSize: '10px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 8px rgba(244,114,182,0.5)', flexShrink: 0 }}>
+              {badge > 99 ? '99+' : badge}
+            </span>
+          )}
           {isActive && <ChevronRight size={12} color={`${color}80`} />}
         </div>
       )}
@@ -92,8 +99,12 @@ export default function Sidebar() {
   const coreLinks = (user?.role === 'hr' || user?.role === 'superuser')
     ? adminCoreLinks
     : user?.role === 'lead'
-      ? adminCoreLinks.filter(l => l.to !== '/master-data' && l.to !== '/audit-log')
+      ? adminCoreLinks.filter(l => l.to !== '/master-data' && l.to !== '/audit-log' && l.to !== '/employees')
       : employeeLinks;
+
+  // "New announcements" badge count (all roles)
+  const { data: annData } = useQuery({ queryKey: ['ann-unread'], queryFn: announcementApi.unreadCount, refetchInterval: 60000, staleTime: 30000 });
+  const annUnread = annData?.count || 0;
   const role = ROLE_CONFIG[user?.role] ?? ROLE_CONFIG.employee;
 
   const handleLogout = () => { logout(); navigate('/login'); };
@@ -152,7 +163,8 @@ export default function Sidebar() {
         </p>
 
         {coreLinks.map(({ to, icon: Icon, label, color, glow }) => (
-          <NavItem key={to} to={to} icon={Icon} label={label} color={color} glow={glow} />
+          <NavItem key={to} to={to} icon={Icon} label={label} color={color} glow={glow}
+            badge={to === '/announcements' ? annUnread : 0} />
         ))}
 
         {/* My Workspace section — only for HR/Lead */}

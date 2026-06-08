@@ -22,6 +22,7 @@ const User = sequelize.define('User', {
   // Profile
   dob: { type: DataTypes.DATEONLY, allowNull: true },
   doj: { type: DataTypes.DATEONLY, allowNull: true },
+  photo: { type: DataTypes.TEXT('long'), allowNull: true },   // base64 data URL (resized)
 
   // ── Employee Master Data (Personal Details form) ──────────────────────────
   // Personal information
@@ -70,6 +71,7 @@ const User = sequelize.define('User', {
   maternity_leave_balance:{ type: DataTypes.DECIMAL(4, 1), defaultValue: 90.0 },  // one-time 90d
   long_leave_balance:     { type: DataTypes.DECIMAL(4, 1), defaultValue:  0.0 },  // HR-allocated
 
+  announcements_seen_at:   { type: DataTypes.DATE, allowNull: true },   // for "new announcements" badge
   last_login:              { type: DataTypes.DATE },
   last_heartbeat:          { type: DataTypes.DATE },
   last_idle_seconds:       { type: DataTypes.INTEGER, defaultValue: 0 },

@@ -291,7 +291,7 @@ function CreateUserModal({ onClose }) {
                   ].map(([k, label]) => (
                     <div key={k}>
                       <label style={S.label}>{label}</label>
-                      <input type="number" min="0" step="0.5" placeholder="default" value={form[k]} onChange={fv(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
+                      <input type="number" min="0" step="1" inputMode="numeric" placeholder="default" value={form[k]} onChange={fv(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
                     </div>
                   ))}
                 </div>

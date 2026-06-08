@@ -5,6 +5,8 @@ const { authenticate, authorize } = require('../middleware/auth');
 router.use(authenticate);
 
 router.get('/', ac.list);
+router.get('/unread-count', ac.unreadCount);   // sidebar badge — all roles
+router.post('/seen',        ac.markSeen);       // mark all as read
 
 // HR/Lead can create, update, delete
 router.post  ('/',     authorize('hr', 'lead'), ac.create);

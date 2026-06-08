@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { Announcement, User } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
 
@@ -8,6 +9,20 @@ exports.list = asyncHandler(async (req, res) => {
     limit: 50,
   });
   res.json({ data: rows });
+});
+
+// Count of announcements newer than the user last viewed (for the sidebar badge).
+exports.unreadCount = asyncHandler(async (req, res) => {
+  const since = req.user.announcements_seen_at;
+  const where = since ? { created_at: { [Op.gt]: since } } : {};
+  const count = await Announcement.count({ where });
+  res.json({ count });
+});
+
+// Mark all announcements as seen (called when the user opens the page).
+exports.markSeen = asyncHandler(async (req, res) => {
+  await User.update({ announcements_seen_at: new Date() }, { where: { id: req.user.id } });
+  res.json({ ok: true });
 });
 
 exports.create = asyncHandler(async (req, res) => {

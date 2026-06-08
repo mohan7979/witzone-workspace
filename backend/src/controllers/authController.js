@@ -155,7 +155,7 @@ exports.me = asyncHandler(async (req, res) => {
 });
 
 exports.updateProfile = asyncHandler(async (req, res) => {
-  const allowed = ['first_name', 'last_name', 'phone'];
+  const allowed = ['first_name', 'last_name', 'phone', 'photo'];
   const updates = {};
   for (const key of allowed) {
     if (req.body[key] !== undefined) updates[key] = req.body[key];

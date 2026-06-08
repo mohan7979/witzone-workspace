@@ -96,7 +96,9 @@ export const masterApi = {
 };
 
 export const announcementApi = {
-  list:   (params) => api.get('/announcements', { params }),
+  list:        (params) => api.get('/announcements', { params }),
+  unreadCount: ()       => api.get('/announcements/unread-count'),
+  markSeen:    ()       => api.post('/announcements/seen'),
   create: (data)   => api.post('/announcements', data),
   update: (id, data) => api.patch(`/announcements/${id}`, data),
   remove: (id)     => api.delete(`/announcements/${id}`),

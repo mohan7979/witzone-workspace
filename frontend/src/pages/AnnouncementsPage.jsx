@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { announcementApi } from '@/api';
 import useAuthStore from '@/store/authStore';
@@ -237,6 +237,13 @@ export default function AnnouncementsPage() {
     queryKey: ['announcements'],
     queryFn: () => announcementApi.list().then(r => r.data),
   });
+
+  // Opening the page marks everything as read → clears the sidebar badge.
+  useEffect(() => {
+    announcementApi.markSeen()
+      .then(() => queryClient.invalidateQueries(['ann-unread']))
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const togglePin = useMutation({
     mutationFn: ({ id, is_pinned }) => announcementApi.update(id, { is_pinned: !is_pinned }).then(r => r.data),
