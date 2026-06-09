@@ -37,10 +37,22 @@ const durationLabel = (leave) => {
   return `${d} day${d === 1 ? '' : 's'}`;
 };
 
+// dd-mm-yyyy date formatting for emails (date-only split avoids timezone drift).
+const fmtDate = (d) => {
+  if (!d) return '';
+  const s = String(d).slice(0, 10);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) { const [y, m, dd] = s.split('-'); return `${dd}-${m}-${y}`; }
+  const dt = new Date(d); if (isNaN(dt.getTime())) return s;
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(dt.getDate())}-${p(dt.getMonth() + 1)}-${dt.getFullYear()}`;
+};
+
 // When/who a request was raised — for "created date / created by" visibility.
 const appliedLine = (employee, leave) => {
   const ts = leave.createdAt || leave.created_at;
-  const when = ts ? new Date(ts).toLocaleString('en-IN', { timeZone: 'Asia/Kolkata', hour12: false }) : '';
+  const when = ts
+    ? new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Kolkata', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false }).replace(',', '').replace(/\//g, '-')
+    : '';
   return `${employee.first_name} ${employee.last_name}${when ? ` on ${when} IST` : ''}`;
 };
 
@@ -110,8 +122,8 @@ exports.sendTlNotificationEmail = (tlEmail, employee, leave) =>
       <p style="color:#475569"><strong>${employee.first_name} ${employee.last_name}</strong> has applied for leave and requires your approval.</p>
       <table style="width:100%;border-collapse:collapse;margin:16px 0">
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;width:110px">Leave Type</td><td style="font-weight:600;color:#1e293b">${typeLabel(leave)}</td></tr>
-        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">From</td><td style="font-weight:600;color:#1e293b">${leave.start_date}</td></tr>
-        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">To</td><td style="font-weight:600;color:#1e293b">${leave.end_date}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">From</td><td style="font-weight:600;color:#1e293b">${fmtDate(leave.start_date)}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">To</td><td style="font-weight:600;color:#1e293b">${fmtDate(leave.end_date)}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Duration</td><td style="font-weight:600;color:#1e293b">${durationLabel(leave)}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Requested</td><td style="color:#334155">${appliedLine(employee, leave)}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;vertical-align:top">Reason</td><td style="color:#334155">${leave.reason}</td></tr>
@@ -131,8 +143,8 @@ exports.sendHrNotificationEmail = (hrEmail, employee, leave, tlName) =>
       <table style="width:100%;border-collapse:collapse;margin:16px 0">
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;width:110px">Employee</td><td style="font-weight:600;color:#1e293b">${employee.first_name} ${employee.last_name}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Leave Type</td><td style="font-weight:600;color:#1e293b">${typeLabel(leave)}</td></tr>
-        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">From</td><td style="font-weight:600;color:#1e293b">${leave.start_date}</td></tr>
-        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">To</td><td style="font-weight:600;color:#1e293b">${leave.end_date}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">From</td><td style="font-weight:600;color:#1e293b">${fmtDate(leave.start_date)}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">To</td><td style="font-weight:600;color:#1e293b">${fmtDate(leave.end_date)}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Duration</td><td style="font-weight:600;color:#1e293b">${durationLabel(leave)}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Requested</td><td style="color:#334155">${appliedLine(employee, leave)}</td></tr>
         <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;vertical-align:top">Reason</td><td style="color:#334155">${leave.reason}</td></tr>
@@ -144,7 +156,7 @@ exports.sendHrNotificationEmail = (hrEmail, employee, leave, tlName) =>
 
 // Notify employee of any status update
 exports.sendLeaveNotificationEmail = (email, employee, leave, action) => {
-  const span = `<strong>${typeLabel(leave)}</strong> (${durationLabel(leave)}) from <strong>${leave.start_date}</strong> to <strong>${leave.end_date}</strong>`;
+  const span = `<strong>${typeLabel(leave)}</strong> (${durationLabel(leave)}) from <strong>${fmtDate(leave.start_date)}</strong> to <strong>${fmtDate(leave.end_date)}</strong>`;
   const configs = {
     approved: {
       subject: '✅ Your Leave Request has been Approved',
@@ -199,7 +211,7 @@ exports.sendReviewerOutcomeEmail = (toEmail, toName, employee, leave, action, de
       <h2 style="color:${color};margin-top:0">Request ${approved ? 'Approved' : 'Rejected'} by ${deciderRole}</h2>
       <p style="color:#475569">Hello <strong>${toName}</strong>,</p>
       <p style="color:#475569">The ${typeLabel(leave)} (${durationLabel(leave)}) for <strong>${employee.first_name} ${employee.last_name}</strong>
-        (${leave.start_date} → ${leave.end_date}) that you reviewed has been
+        (${fmtDate(leave.start_date)} → ${fmtDate(leave.end_date)}) that you reviewed has been
         <span style="color:${color};font-weight:700">${approved ? 'approved' : 'rejected'}</span> by ${deciderRole}.</p>
       ${leave.reviewer_comment ? `<p style="color:#64748b;font-size:13px">${deciderRole} Comment: ${leave.reviewer_comment}</p>` : ''}
       ${ctaButton(`${APP_URL}/leaves`, 'Open Witzone Workspace', '#64748b')}

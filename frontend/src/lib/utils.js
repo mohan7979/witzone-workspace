@@ -10,8 +10,20 @@ export const isAdminRole = (role) => ADMIN_ROLES.includes(role);
 // HR-level authority (HR + Superuser) — full org visibility & approval rights.
 export const isHRLevel = (role) => role === 'hr' || role === 'superuser';
 
-export const formatDate = (date) =>
-  date ? new Date(date).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) : '—';
+// dd-mm-yyyy everywhere. Date-only strings are split directly (no timezone drift);
+// full timestamps fall back to the local calendar date.
+export const formatDate = (date) => {
+  if (!date) return '—';
+  const s = String(date);
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {              // pure yyyy-mm-dd (DATEONLY)
+    const [y, m, d] = s.split('-');
+    return `${d}-${m}-${y}`;
+  }
+  const dt = new Date(date);
+  if (isNaN(dt.getTime())) return s;
+  const pad = (n) => String(n).padStart(2, '0');
+  return `${pad(dt.getDate())}-${pad(dt.getMonth() + 1)}-${dt.getFullYear()}`;
+};
 
 // 24-hour clock everywhere (e.g. 18:30, not 6:30 PM)
 export const formatTime = (date) =>

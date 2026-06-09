@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useEffect, useState } from 'react';
 import { idleApi } from '@/api';
-import { formatHMS, formatTime } from '@/lib/utils';
+import { formatHMS, formatTime, formatDate } from '@/lib/utils';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -43,7 +43,7 @@ function IdleTimelineModal({ userId, date, name, onClose }) {
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px', borderBottom:'1px solid rgba(255,255,255,0.07)', flexShrink:0 }}>
           <div>
             <p style={{ fontSize:'15px', fontWeight:700, color:'#F1F5F9' }}>Idle Timeline — {name}</p>
-            <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>{date}</p>
+            <p style={{ fontSize:'12px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>{formatDate(date)}</p>
           </div>
           <button onClick={onClose} style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', cursor:'pointer', color:'rgba(241,245,249,0.5)', padding:'6px', display:'flex', transition:'all 0.15s' }}
             onMouseEnter={e => { e.currentTarget.style.background='rgba(255,255,255,0.1)'; e.currentTarget.style.color='#F1F5F9'; }}

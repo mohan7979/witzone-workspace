@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Calendar } from 'lucide-react';
 import { attendanceApi, userApi } from '@/api';
 import Badge from '@/components/ui/Badge';
-import { formatTime, formatDuration, formatHMS } from '@/lib/utils';
+import { formatTime, formatDuration, formatHMS, formatDate } from '@/lib/utils';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
 
 const glass   = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -126,7 +126,7 @@ export default function HRAttendancePage() {
           <div>
             <p style={{ fontWeight:700, color:'#FBBF24', fontSize:'14px' }}>Weekend — Non-working day</p>
             <p style={{ color:'rgba(251,191,36,0.6)', fontSize:'12px', marginTop:'2px' }}>
-              {date} is a weekend, so employees are off and never marked absent. Only those who actually
+              {formatDate(date)} is a weekend, so employees are off and never marked absent. Only those who actually
               worked (emergency / overtime) are listed below.
             </p>
           </div>
@@ -159,7 +159,7 @@ export default function HRAttendancePage() {
                 )}
                 {!isLoading && !tc.total && (
                   <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
-                    {isWeekend ? `No employees worked on ${date}` : `No ${filter === 'all' ? '' : filter} records for ${date}`}
+                    {isWeekend ? `No employees worked on ${formatDate(date)}` : `No ${filter === 'all' ? '' : filter} records for ${formatDate(date)}`}
                   </td></tr>
                 )}
                 {tc.view.map((row) => (
