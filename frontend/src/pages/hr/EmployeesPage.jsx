@@ -525,8 +525,10 @@ export default function EmployeesPage() {
                     {/* Name + email */}
                     <td style={S.td}>
                       <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                        <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#6366F1,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, flexShrink:0, boxShadow:'0 0 10px rgba(99,102,241,0.3)' }}>
-                          {user.first_name?.[0]}{user.last_name?.[0]}
+                        <div style={{ width:'32px', height:'32px', borderRadius:'50%', overflow:'hidden', background:'linear-gradient(135deg,#6366F1,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, flexShrink:0, boxShadow:'0 0 10px rgba(99,102,241,0.3)' }}>
+                          {user.photo_thumb
+                            ? <img src={user.photo_thumb} alt="" style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                            : <>{user.first_name?.[0]}{user.last_name?.[0]}</>}
                         </div>
                         <div>
                           <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{user.first_name} {user.last_name}</p>

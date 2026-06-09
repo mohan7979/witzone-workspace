@@ -221,6 +221,7 @@ export default function ProfilePage() {
   const [editOpen, setEditOpen] = useState(false);
   const [pwOpen, setPwOpen] = useState(false);
   const [photoBusy, setPhotoBusy] = useState(false);
+  const [photoView, setPhotoView] = useState(false);
   const photoRef = useRef(null);
   const qc = useQueryClient();
 
@@ -239,8 +240,11 @@ export default function ProfilePage() {
     if (!file.type.startsWith('image/')) { toast.error('Please choose an image file'); return; }
     setPhotoBusy(true);
     try {
-      const dataUrl = await resizeImageToDataUrl(file, 256);
-      const res = await authApi.updateProfile({ photo: dataUrl });
+      const [photo, photo_thumb] = await Promise.all([
+        resizeImageToDataUrl(file, 256),   // full — profile & details
+        resizeImageToDataUrl(file, 64),    // tiny — list avatars
+      ]);
+      const res = await authApi.updateProfile({ photo, photo_thumb });
       const updated = res.user || res;
       qc.setQueryData(['me'], updated);
       updateUser(updated);                 // reflects in the sidebar avatar too
@@ -282,7 +286,7 @@ export default function ProfilePage() {
           <div style={{ position: 'relative', width: 88, height: 88, margin: '0 auto 16px' }}>
             <div style={{ width: 88, height: 88, borderRadius: '50%', background: avatarGrad, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 30, fontWeight: 700, color: '#fff', boxShadow: '0 0 0 4px rgba(129,140,248,0.2)', overflow: 'hidden' }}>
               {user?.photo
-                ? <img src={user.photo} alt="Profile" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ? <img src={user.photo} alt="Profile" onClick={() => setPhotoView(true)} title="Click to view" style={{ width: '100%', height: '100%', objectFit: 'cover', cursor: 'zoom-in' }} />
                 : initials}
             </div>
             <button type="button" onClick={() => photoRef.current?.click()} disabled={photoBusy} title="Change photo"
@@ -392,6 +396,13 @@ export default function ProfilePage() {
 
       {editOpen && <EditProfileModal user={user} onClose={() => setEditOpen(false)} />}
       {pwOpen   && <ChangePasswordModal onClose={() => setPwOpen(false)} />}
+
+      {/* Photo lightbox */}
+      {photoView && user?.photo && (
+        <div onClick={() => setPhotoView(false)} style={{ position: 'fixed', inset: 0, zIndex: 60, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(4,7,18,0.92)', padding: 24, cursor: 'zoom-out' }}>
+          <img src={user.photo} alt="Profile" style={{ maxWidth: '80vw', maxHeight: '80vh', borderRadius: 16, boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }} />
+        </div>
+      )}
     </div>
   );
 }

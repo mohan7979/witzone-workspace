@@ -22,7 +22,8 @@ const User = sequelize.define('User', {
   // Profile
   dob: { type: DataTypes.DATEONLY, allowNull: true },
   doj: { type: DataTypes.DATEONLY, allowNull: true },
-  photo: { type: DataTypes.TEXT('long'), allowNull: true },   // base64 data URL (resized)
+  photo:       { type: DataTypes.TEXT('long'), allowNull: true },   // full base64 data URL (~256px)
+  photo_thumb: { type: DataTypes.TEXT,         allowNull: true },   // tiny base64 (~64px) for list avatars
 
   // ── Employee Master Data (Personal Details form) ──────────────────────────
   // Personal information
