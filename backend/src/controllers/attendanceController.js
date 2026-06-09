@@ -104,7 +104,9 @@ async function finalizeClockOut(rec, now, logoutField, logoutIp) {
   const s2Out = logoutField === 'logout_time_2' ? now : rec.logout_time_2;
   const totalHrs  = calcTotalHours(rec, s1Out, s2Out);
   const effectiveHrs = parseFloat(Math.max(0, totalHrs - idleSecs / 3600).toFixed(2));
-  const status    = totalHrs < 4.5 ? 'half_day' : 'present';
+  // A two-session day (clocked in a second time) counts as present regardless of
+  // hours; a single short session (< 4.5h) is a half day.
+  const status    = (rec.login_time_2 || totalHrs >= 4.5) ? 'present' : 'half_day';
 
   await rec.update({
     ...updates,
@@ -155,7 +157,9 @@ exports.clockIn = asyncHandler(async (req, res) => {
 
   /* ── Session 2 ── */
   if (!rec.login_time_2) {
-    await rec.update({ login_time_2: now });
+    // Back at work for a second session → they're present again (a short first
+    // session may have flipped the day to half_day at clock-out; undo that).
+    await rec.update({ login_time_2: now, status: 'present' });
     return res.json({ message: 'Clocked in (Session 2)', attendance: rec, state: 'session2_active' });
   }
 
