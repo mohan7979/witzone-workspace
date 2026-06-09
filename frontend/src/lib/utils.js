@@ -20,6 +20,14 @@ export const formatTime = (date) =>
 // Format a stored "HH:MM:SS" / "HH:MM" time-of-day string as 24h "HH:MM"
 export const formatClock = (t) => (t ? String(t).slice(0, 5) : '—');
 
+// Format a date / "yyyy-mm-dd" value as "dd-mm-yyyy" (used for DOB / DOJ display).
+export const formatDMY = (d) => {
+  if (!d) return '—';
+  const s = String(d).slice(0, 10);          // yyyy-mm-dd (DATEONLY)
+  const [y, m, day] = s.split('-');
+  return (y && m && day) ? `${day}-${m}-${y}` : s;
+};
+
 export const formatDuration = (hours) => {
   if (!hours) return '—';
   const h = Math.floor(hours);

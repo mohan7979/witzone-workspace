@@ -4,6 +4,7 @@ import { X, Pencil, Save, IdCard } from 'lucide-react';
 import { userApi, masterApi } from '@/api';
 import MasterDataFields from './MasterDataFields';
 import useAuthStore from '@/store/authStore';
+import { formatDMY } from '@/lib/utils';
 import toast from 'react-hot-toast';
 
 const S = {
@@ -210,7 +211,7 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
                       <label style={S.label}>{label}</label>
                       {edit
                         ? <input type={type} value={form[k] ?? ''} onChange={onField(k)} style={S.input} onFocus={focusStyle} onBlur={blurStyle} />
-                        : <div style={S.readVal}>{form[k] ? String(form[k]) : <span style={{ color:'rgba(241,245,249,0.25)' }}>—</span>}</div>}
+                        : <div style={S.readVal}>{form[k] ? (type === 'date' ? formatDMY(form[k]) : String(form[k])) : <span style={{ color:'rgba(241,245,249,0.25)' }}>—</span>}</div>}
                     </div>
                   ))}
                 </div>
