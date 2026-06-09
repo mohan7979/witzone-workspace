@@ -200,8 +200,8 @@ export default function HRDashboard() {
         </div>
       </div>
 
-      {/* My Attendance (HR/Lead can also clock in/out) */}
-      <ClockWidget compact />
+      {/* My Attendance (HR/Lead can also clock in/out) — full widget, same as employees */}
+      <ClockWidget />
 
       {/* Stats */}
       <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px' }}>

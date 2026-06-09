@@ -3,7 +3,7 @@ import { useRef, useEffect, useState } from 'react';
 import { idleApi } from '@/api';
 import { formatHMS, formatTime } from '@/lib/utils';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
-import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const glass   = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -125,18 +125,24 @@ function timeSince(dateStr) {
 }
 
 function UserRow({ user, type }) {
-  const gradients = { disconnected:'linear-gradient(135deg,#334155,#475569)', idle:'linear-gradient(135deg,#EF4444,#F87171)', active:'linear-gradient(135deg,#10B981,#34D399)' };
+  const gradients = { disconnected:'linear-gradient(135deg,#334155,#475569)', idle:'linear-gradient(135deg,#EF4444,#F87171)', active:'linear-gradient(135deg,#10B981,#34D399)', break:'linear-gradient(135deg,#F59E0B,#FBBF24)' };
+  const glowRgb = { active:'52,211,153', idle:'248,113,113', break:'251,191,36', disconnected:'148,163,184' }[type] || '148,163,184';
 
   return (
     <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'14px 20px', borderBottom:'1px solid rgba(255,255,255,0.04)', transition:'background 0.12s' }}
       onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
       onMouseLeave={e => e.currentTarget.style.background='transparent'}>
       <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-        <div style={{ width:'32px', height:'32px', borderRadius:'50%', flexShrink:0, background:gradients[type], display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, boxShadow:`0 0 12px rgba(${type==='active'?'52,211,153':type==='idle'?'248,113,113':'148,163,184'},0.3)` }}>
+        <div style={{ width:'32px', height:'32px', borderRadius:'50%', flexShrink:0, background:gradients[type], display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, boxShadow:`0 0 12px rgba(${glowRgb},0.3)` }}>
           {user.first_name?.[0]}{user.last_name?.[0]}
         </div>
         <div>
-          <p style={{ fontSize:'13px', fontWeight:600, color:'#F1F5F9' }}>{user.first_name} {user.last_name}</p>
+          <p style={{ fontSize:'13px', fontWeight:600, color:'#F1F5F9', display:'flex', alignItems:'center', gap:'6px' }}>
+            {user.first_name} {user.last_name}
+            {user.session === 2 && (
+              <span style={{ fontSize:'9px', fontWeight:700, padding:'1px 6px', borderRadius:'5px', background:'rgba(129,140,248,0.15)', color:'#818CF8', border:'1px solid rgba(129,140,248,0.3)' }}>SESSION 2</span>
+            )}
+          </p>
           <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>{user.department} · {user.employee_id}</p>
         </div>
       </div>
@@ -145,6 +151,11 @@ function UserRow({ user, type }) {
         {type === 'disconnected' && (
           <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'4px 12px', borderRadius:'7px', fontSize:'11px', fontWeight:700, background:'rgba(148,163,184,0.1)', color:'#94A3B8', border:'1px solid rgba(148,163,184,0.25)' }}>
             <WifiOff size={11} /> Offline
+          </span>
+        )}
+        {type === 'break' && (
+          <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'4px 12px', borderRadius:'7px', fontSize:'11px', fontWeight:700, background:'rgba(251,191,36,0.15)', color:'#FBBF24', border:'1px solid rgba(251,191,36,0.3)' }}>
+            <Coffee size={11} /> On Break
           </span>
         )}
         {type === 'idle' && (
@@ -185,8 +196,9 @@ export default function IdleMonitorPage() {
 
   const active       = live?.active       || [];
   const idle         = live?.idle         || [];
+  const onBreak      = live?.break        || [];
   const disconnected = live?.disconnected || [];
-  const total        = active.length + idle.length + disconnected.length;
+  const total        = active.length + idle.length + onBreak.length + disconnected.length;
 
   const alertedHighIdle     = useRef(new Set());
   const alertedDisconnected = useRef(new Set());
@@ -209,9 +221,10 @@ export default function IdleMonitorPage() {
   }, [live]);
 
   const STAT_CARDS = [
-    { label:'Active', count:active.length, color:'#34D399', glow:'rgba(52,211,153,0.25)', gradient:'linear-gradient(135deg,#10B981,#34D399)', icon:<Activity size={18} color="white" /> },
-    { label:'Idle',   count:idle.length,   color:'#F87171', glow:'rgba(248,113,113,0.25)', gradient:'linear-gradient(135deg,#EF4444,#F87171)', icon:<AlertTriangle size={18} color="white" /> },
-    { label:'Offline',count:disconnected.length, color:'#94A3B8', glow:'rgba(148,163,184,0.15)', gradient:'linear-gradient(135deg,#475569,#64748B)', icon:<WifiOff size={18} color="white" /> },
+    { label:'Active',   count:active.length,       color:'#34D399', glow:'rgba(52,211,153,0.25)', gradient:'linear-gradient(135deg,#10B981,#34D399)', icon:<Activity size={18} color="white" /> },
+    { label:'Idle',     count:idle.length,         color:'#F87171', glow:'rgba(248,113,113,0.25)', gradient:'linear-gradient(135deg,#EF4444,#F87171)', icon:<AlertTriangle size={18} color="white" /> },
+    { label:'On Break', count:onBreak.length,      color:'#FBBF24', glow:'rgba(251,191,36,0.25)',  gradient:'linear-gradient(135deg,#F59E0B,#FBBF24)', icon:<Coffee size={18} color="white" /> },
+    { label:'Offline',  count:disconnected.length, color:'#94A3B8', glow:'rgba(148,163,184,0.15)', gradient:'linear-gradient(135deg,#475569,#64748B)', icon:<WifiOff size={18} color="white" /> },
   ];
 
   return (
@@ -229,7 +242,7 @@ export default function IdleMonitorPage() {
       </div>
 
       {/* Stat cards */}
-      <div style={{ display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'16px' }}>
+      <div style={{ display:'grid', gridTemplateColumns:'repeat(4,1fr)', gap:'16px' }}>
         {STAT_CARDS.map(({ label, count, color, glow, gradient, icon }) => (
           <div key={label} style={{ ...glass, padding:'22px', position:'relative', overflow:'hidden' }}>
             <div style={{ position:'absolute', top:'-20px', right:'-20px', width:'100px', height:'100px', borderRadius:'50%', background:`radial-gradient(circle,${glow} 0%,transparent 70%)`, pointerEvents:'none' }} />
@@ -270,6 +283,17 @@ export default function IdleMonitorPage() {
                   <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.2)', marginTop:'2px' }}>Clocked in but no agent heartbeat in 5+ minutes</p>
                 </div>
                 {disconnected.map((u) => <UserRow key={u.user_id} user={u} type="disconnected" />)}
+              </div>
+            )}
+            {onBreak.length > 0 && (
+              <div>
+                <div style={{ padding:'8px 20px', background:'rgba(251,191,36,0.04)', borderBottom:'1px solid rgba(255,255,255,0.04)' }}>
+                  <p style={{ fontSize:'11px', fontWeight:700, color:'#FBBF24', textTransform:'uppercase', letterSpacing:'0.6px', display:'flex', alignItems:'center', gap:'6px' }}>
+                    <Coffee size={11} /> On Break ({onBreak.length})
+                  </p>
+                  <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.2)', marginTop:'2px' }}>On an active break — idle time is not counted</p>
+                </div>
+                {onBreak.map((u) => <UserRow key={u.user_id} user={u} type="break" />)}
               </div>
             )}
             {idle.length > 0 && (

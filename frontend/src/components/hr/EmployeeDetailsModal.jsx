@@ -42,6 +42,7 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
   const qc = useQueryClient();
   const [edit, setEdit] = useState(startInEdit);
   const [form, setForm] = useState({});
+  const [photoOpen, setPhotoOpen] = useState(false);
 
   const { user: me } = useAuthStore();
 
@@ -109,9 +110,14 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
         {/* Header */}
         <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'20px 24px', borderBottom:'1px solid rgba(255,255,255,0.07)', position:'sticky', top:0, background:'rgba(13,17,30,0.98)', borderRadius:'20px 20px 0 0', zIndex:1 }}>
           <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-            <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:'linear-gradient(135deg,#A78BFA,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center' }}>
-              <IdCard size={16} color="white" />
-            </div>
+            {user?.photo ? (
+              <img src={user.photo} alt="Photo" onClick={() => setPhotoOpen(true)} title="Click to view photo"
+                style={{ width:'34px', height:'34px', borderRadius:'10px', objectFit:'cover', cursor:'pointer', boxShadow:'0 0 0 1px rgba(255,255,255,0.15)' }} />
+            ) : (
+              <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:'linear-gradient(135deg,#A78BFA,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center' }}>
+                <IdCard size={16} color="white" />
+              </div>
+            )}
             <div>
               <p style={{ fontSize:'15px', fontWeight:700, color:'#F1F5F9' }}>{user ? `${user.first_name} ${user.last_name}` : 'Employee Details'}</p>
               <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)' }}>{user ? `${user.employee_id} · ${ROLE_LABEL[user.role] || user.role}` : 'Master Data'}</p>
@@ -250,6 +256,13 @@ export default function EmployeeDetailsModal({ userId, startInEdit = false, onCl
           )}
         </div>
       </div>
+
+      {/* Photo lightbox */}
+      {photoOpen && user?.photo && (
+        <div onClick={() => setPhotoOpen(false)} style={{ position:'fixed', inset:0, zIndex:60, display:'flex', alignItems:'center', justifyContent:'center', background:'rgba(4,7,18,0.92)', padding:'24px', cursor:'zoom-out' }}>
+          <img src={user.photo} alt="Employee photo" style={{ maxWidth:'80vw', maxHeight:'80vh', borderRadius:'16px', boxShadow:'0 24px 64px rgba(0,0,0,0.6)' }} />
+        </div>
+      )}
     </div>
   );
 }

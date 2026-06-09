@@ -262,10 +262,12 @@ exports.idleDetail = asyncHandler(async (req, res) => {
 });
 
 /**
- * Live status — all employees who clocked in today, grouped by state:
- *   active       — heartbeat within 5 min, idle_seconds < 60
- *   idle         — heartbeat within 5 min, idle_seconds >= 60
- *   disconnected — clocked in but no heartbeat in 5+ min
+ * Live status — all employees currently in an active work session today, grouped:
+ *   active       — heartbeat within 5 min, not on break, idle_seconds < 60
+ *   idle         — heartbeat within 5 min, not on break, idle_seconds >= 60
+ *   break        — currently on break (idle does NOT count as idle here)
+ *   disconnected — in a session but no heartbeat in 5+ min
+ * "In a session" means session 1 OR session 2 is open (a 2nd clock-in counts).
  */
 exports.liveIdleStatus = asyncHandler(async (req, res) => {
   const now       = nowIST().toDate();
@@ -283,14 +285,16 @@ exports.liveIdleStatus = asyncHandler(async (req, res) => {
     }],
   });
 
-  const active = [], idle = [], disconnected = [];
+  const active = [], idle = [], breaks = [], disconnected = [];
 
   for (const att of clockedIn) {
     const user = att.user;
     if (!user) continue;
 
-    // Skip employees who already clocked out — they're no longer "live"
-    if (att.logout_time) continue;
+    // "Live" = currently inside an open session (session 1 OR session 2).
+    const s1Active = att.login_time   && !att.logout_time;
+    const s2Active = att.login_time_2 && !att.logout_time_2;
+    if (!s1Active && !s2Active) continue;   // fully clocked out → not live
 
     const hb = user.last_heartbeat ? new Date(user.last_heartbeat) : null;
     const entry = {
@@ -301,10 +305,13 @@ exports.liveIdleStatus = asyncHandler(async (req, res) => {
       department:     user.department,
       last_heartbeat: hb,
       idle_seconds:   user.last_idle_seconds,
+      session:        s2Active ? 2 : 1,   // so the UI can show "Session 2"
     };
 
     if (!hb || hb < threshold) {
       disconnected.push({ ...entry, idle_seconds: null });
+    } else if (att.on_break) {
+      breaks.push(entry);                  // on break → not idle
     } else if ((user.last_idle_seconds || 0) >= 60) {
       idle.push(entry);
     } else {
@@ -312,5 +319,5 @@ exports.liveIdleStatus = asyncHandler(async (req, res) => {
     }
   }
 
-  res.json({ active, idle, disconnected });
+  res.json({ active, idle, break: breaks, disconnected });
 });
