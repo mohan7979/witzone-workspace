@@ -149,7 +149,7 @@ function ReviewModal({ leave, role, onClose }) {
             <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
             <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color: isTL ? 'rgba(241,245,249,0.25)' : '#818CF8' }}>
               <div style={{ width:'8px', height:'8px', borderRadius:'50%', background: isTL ? 'rgba(255,255,255,0.15)' : '#818CF8' }} />
-              HR Final {!isTL ? '← You are here' : ''}
+              {isSuper ? 'Superuser Final' : 'HR Final'} {!isTL ? '← You are here' : ''}
             </div>
           </div>
 
