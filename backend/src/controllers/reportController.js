@@ -2,6 +2,7 @@ const { Op, fn, col, literal } = require('sequelize');
 const moment = require('moment');
 const { Attendance, Leave, IdleLog, User } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
+const { todayIST, nowIST } = require('../utils/ist');
 
 const buildUserWhere = (req, extra = {}) => {
   const where = { status: 'active', ...extra };
@@ -231,31 +232,48 @@ async function countActionablePending(req) {
 }
 
 exports.dashboardStats = asyncHandler(async (req, res) => {
-  const today = moment().format('YYYY-MM-DD');
+  // Use IST dates so the day boundary matches how attendance rows are dated
+  // (clock-in stamps date = todayIST) and so counts roll over at IST midnight.
+  const today = todayIST();
+  const yesterday = nowIST().subtract(1, 'day').format('YYYY-MM-DD');
   const isWeekend = [0, 6].includes(moment(today).day());   // Sun=0, Sat=6 → non-working
   const allActiveWhere = buildUserWhere(req);
   const userInc = [{ model: User, as: 'user', where: allActiveWhere, attributes: [] }];
 
+  // Overnight shift still open from yesterday = "working now" (counts present,
+  // not absent) so the dashboard doesn't drop night staff after midnight.
+  const overnightWhere = {
+    date: yesterday,
+    login_time: { [Op.ne]: null },
+    status: { [Op.ne]: 'absent' },
+    [Op.or]: [
+      { logout_time: null },
+      { login_time_2: { [Op.ne]: null }, logout_time_2: null },
+    ],
+  };
+
   // Counts are defined to MATCH the Team Attendance tabs exactly (status-based),
   // so the dashboard number equals the list you see when you click it:
-  //   present  = today's records with status 'present'
-  //   absent   = active employees with NO non-absent record today
+  //   present  = today's records with status 'present' (+ overnight in-progress)
+  //   absent   = active employees with NO non-absent record today (excl. overnight)
   //   on_leave / half_day = their respective statuses
-  const [totalEmployees, presentToday, nonAbsentToday, onLeaveToday, halfDayToday, pendingLeaves] = await Promise.all([
+  const [totalEmployees, presentToday, nonAbsentToday, onLeaveToday, halfDayToday, overnightWorking, pendingLeaves] = await Promise.all([
     User.count({ where: allActiveWhere }),
     Attendance.count({ where: { date: today, status: 'present' },              include: userInc }),
     Attendance.count({ where: { date: today, status: { [Op.ne]: 'absent' } },  include: userInc }),
     Attendance.count({ where: { date: today, status: 'on_leave' },             include: userInc }),
     Attendance.count({ where: { date: today, status: 'half_day' },             include: userInc }),
+    Attendance.count({ where: overnightWhere,                                  include: userInc }),
     countActionablePending(req),
   ]);
 
   res.json({
     total_employees: totalEmployees,
-    present_today:   presentToday,
+    present_today:   presentToday + overnightWorking,
     // On weekends nobody is "absent" — it's a non-working day. Only those who
-    // actually worked (presentToday) are counted; everyone else is simply off.
-    absent_today:    isWeekend ? 0 : Math.max(0, totalEmployees - nonAbsentToday),
+    // actually worked are counted; everyone else is simply off. Overnight staff
+    // still mid-shift are excluded from the absent count.
+    absent_today:    isWeekend ? 0 : Math.max(0, totalEmployees - nonAbsentToday - overnightWorking),
     on_leave_today:  onLeaveToday,
     half_day_today:  halfDayToday,
     pending_leaves:  pendingLeaves,

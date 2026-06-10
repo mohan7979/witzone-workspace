@@ -357,6 +357,8 @@ exports.myHistory = asyncHandler(async (req, res) => {
 exports.teamAttendance = asyncHandler(async (req, res) => {
   const { date, department, page = 1, limit = 200 } = req.query;
   const today = date || todayIST();
+  const isToday = today === todayIST();
+  const yesterday = nowIST().subtract(1, 'day').format('YYYY-MM-DD');
 
   const dayOfWeek = dayOfWeekIST(today);
   const isWeekendDay = dayOfWeek === 0 || dayOfWeek === 6;
@@ -365,40 +367,60 @@ exports.teamAttendance = asyncHandler(async (req, res) => {
   if (department) userWhere.department = department;
   if (req.user.role === 'lead') userWhere.manager_id = req.user.id;
 
+  const userInclude = {
+    model: User, as: 'user', where: userWhere,
+    attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
+  };
+
+  // On the live (today) view, an overnight shift that began yesterday and is
+  // still open counts as "working now" — otherwise it vanishes after midnight
+  // and the employee would wrongly show absent / not appear.
+  const fetchOvernightOpen = () => (!isToday ? Promise.resolve([]) : Attendance.findAll({
+    where: {
+      date: yesterday,
+      login_time: { [Op.ne]: null },
+      [Op.or]: [
+        { logout_time: null },                                       // session 1 still open
+        { login_time_2: { [Op.ne]: null }, logout_time_2: null },     // session 2 still open
+      ],
+    },
+    include: [userInclude],
+  }));
+
   // Weekends are non-working days. Rather than marking everyone absent, show ONLY
-  // the employees who actually clocked in (e.g. emergency Saturday work). Others
-  // are simply off — never flagged absent.
+  // the employees who actually clocked in (e.g. emergency Saturday work) plus
+  // anyone still mid-overnight-shift. Others are simply off — never flagged absent.
   if (isWeekendDay) {
-    const worked = await Attendance.findAll({
-      where: { date: today, login_time: { [Op.ne]: null } },
-      include: [{
-        model: User, as: 'user', where: userWhere,
-        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
-      }],
-    });
-    const lim = parseInt(limit);
+    const [worked, overnight] = await Promise.all([
+      Attendance.findAll({ where: { date: today, login_time: { [Op.ne]: null } }, include: [userInclude] }),
+      fetchOvernightOpen(),
+    ]);
+    const byId = {};
+    for (const r of worked)    if (r.user?.id) byId[r.user.id] = r;
+    for (const r of overnight) if (r.user?.id && !byId[r.user.id]) byId[r.user.id] = r;
+    const all    = Object.values(byId);
+    const lim    = parseInt(limit);
     const offset = (parseInt(page) - 1) * lim;
-    return res.json({ date: today, weekend: true, total: worked.length, data: worked.slice(offset, offset + lim) });
+    return res.json({ date: today, weekend: true, total: all.length, data: all.slice(offset, offset + lim) });
   }
 
-  const [employees, records] = await Promise.all([
+  const [employees, records, overnight] = await Promise.all([
     User.findAll({
       where: userWhere,
       attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
       order: [['first_name', 'ASC']],
     }),
-    Attendance.findAll({
-      where: { date: today },
-      include: [{
-        model: User, as: 'user', where: userWhere,
-        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
-      }],
-    }),
+    Attendance.findAll({ where: { date: today }, include: [userInclude] }),
+    fetchOvernightOpen(),
   ]);
 
   const recordByUserId = {};
   for (const r of records) {
     if (r.user?.id) recordByUserId[r.user.id] = r;
+  }
+  // An overnight worker with no today row shows their open shift, not "absent".
+  for (const r of overnight) {
+    if (r.user?.id && !recordByUserId[r.user.id]) recordByUserId[r.user.id] = r;
   }
 
   const rows = employees.map((emp) => {
