@@ -43,11 +43,13 @@ def resource_path(rel):
 ICON_FILE = resource_path("witzone.png")  # Witzone logo for the system-tray icon
 
 # Shared state
-last_activity = time.time()
-auth_token    = None
-server_url    = None
-current_user  = None
-running       = True
+last_activity  = time.time()
+auth_token     = None
+server_url     = None
+current_user   = None
+running        = True
+saved_email    = None    # kept so the agent can silently re-login when its token expires
+saved_password = None
 
 
 # ---------------------------------------------------------------------------
@@ -61,9 +63,20 @@ def load_config():
     return cfg
 
 
-def save_config(url, token):
+def save_config(url, token, email=None, password=None):
+    """Persist session. Merges with any existing config so a token-only refresh
+    doesn't wipe the saved credentials used for silent re-login."""
     cfg = configparser.ConfigParser()
-    cfg["agent"] = {"server_url": url, "auth_token": token}
+    if os.path.exists(CONFIG_FILE):
+        cfg.read(CONFIG_FILE)
+    if "agent" not in cfg:
+        cfg["agent"] = {}
+    cfg["agent"]["server_url"] = url
+    cfg["agent"]["auth_token"] = token
+    if email is not None:
+        cfg["agent"]["email"] = email
+    if password is not None:
+        cfg["agent"]["pw"] = base64.b64encode(password.encode()).decode()
     with open(CONFIG_FILE, "w") as f:
         cfg.write(f)
 
@@ -147,24 +160,54 @@ def validate_token(url, token):
     return None
 
 
+def reauthenticate():
+    """Silently re-login with the saved credentials when the token has expired,
+    so heartbeats never die mid-shift. Returns True on success."""
+    global auth_token
+    if not (server_url and saved_email and saved_password):
+        return False
+    try:
+        r = requests.post(
+            f"{server_url}/api/auth/login",
+            json={"email": saved_email, "password": saved_password, "agent": True},
+            timeout=10,
+        )
+        if r.ok:
+            auth_token = r.json()["token"]
+            save_config(server_url, auth_token)
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Token expired — re-authenticated.")
+            return True
+    except requests.exceptions.RequestException:
+        pass
+    return False
+
+
+def _auth_headers():
+    return {"Authorization": f"Bearer {auth_token}"}
+
+
+def authed_request(method, path, **kwargs):
+    """Make an authenticated request; on 401 (expired token) re-login once and
+    retry. Returns the Response, or None on a network error."""
+    url = f"{server_url}{path}"
+    try:
+        r = requests.request(method, url, headers=_auth_headers(), **kwargs)
+        if r.status_code == 401 and reauthenticate():
+            r = requests.request(method, url, headers=_auth_headers(), **kwargs)
+        return r
+    except requests.exceptions.RequestException as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Request failed ({path}): {e}")
+        return None
+
+
 def send_heartbeat():
     if not auth_token or not server_url:
         return
-    payload = {
+    authed_request("POST", "/api/idle/heartbeat", timeout=10, json={
         "idle_seconds":  get_idle_seconds(),
         "machine_name":  socket.gethostname(),
         "agent_version": AGENT_VERSION,
-    }
-    try:
-        r = requests.post(
-            f"{server_url}/api/idle/heartbeat",
-            json=payload,
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=10,
-        )
-        r.raise_for_status()
-    except requests.exceptions.RequestException as e:
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] Heartbeat failed: {e}")
+    })
 
 
 def capture_and_upload():
@@ -186,12 +229,7 @@ def capture_and_upload():
         buf = io.BytesIO()
         img.save(buf, format="JPEG", quality=SCREEN_JPEG_QUALITY)
         b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-        requests.post(
-            f"{server_url}/api/idle/screen/frame",
-            json={"image": b64},
-            headers={"Authorization": f"Bearer {auth_token}"},
-            timeout=15,
-        )
+        authed_request("POST", "/api/idle/screen/frame", timeout=15, json={"image": b64})
     except Exception as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Screen capture failed: {e}")
 
@@ -202,14 +240,10 @@ def screen_loop():
     while True:
         try:
             if auth_token and server_url:
-                r = requests.get(
-                    f"{server_url}/api/idle/screen/poll",
-                    headers={"Authorization": f"Bearer {auth_token}"},
-                    timeout=10,
-                )
-                if r.ok and r.json().get("capture"):
+                r = authed_request("GET", "/api/idle/screen/poll", timeout=10)
+                if r is not None and r.ok and r.json().get("capture"):
                     capture_and_upload()
-        except requests.exceptions.RequestException:
+        except Exception:
             pass
         time.sleep(SCREEN_POLL_INTERVAL)
 
@@ -246,7 +280,7 @@ def make_icon(authenticated=True):
 # ---------------------------------------------------------------------------
 
 def on_login(icon, item):
-    global auth_token, server_url, current_user
+    global auth_token, server_url, current_user, saved_email, saved_password
 
     # On Windows frozen exe: open a small input dialog via PowerShell
     # On dev/Mac: fall back to terminal input
@@ -263,16 +297,18 @@ def on_login(icon, item):
     try:
         r = requests.post(
             f"{url}/api/auth/login",
-            json={"email": email, "password": password},
+            json={"email": email, "password": password, "agent": True},
             timeout=10,
         )
         r.raise_for_status()
         data = r.json()
 
-        auth_token   = data["token"]
-        server_url   = url
-        current_user = data["user"]
-        save_config(url, auth_token)
+        auth_token     = data["token"]
+        server_url     = url
+        current_user   = data["user"]
+        saved_email    = email
+        saved_password = password
+        save_config(url, auth_token, email, password)
 
         name = f"{current_user['first_name']} {current_user['last_name']}"
         print(f"Logged in as {name} ({current_user.get('employee_id', '')})")
@@ -358,22 +394,36 @@ def _show_balloon(icon, title, message):
 # ---------------------------------------------------------------------------
 
 def main():
-    global auth_token, server_url, current_user, running
+    global auth_token, server_url, current_user, running, saved_email, saved_password
 
     # Load and validate saved credentials
     cfg = load_config()
     if "agent" in cfg:
         saved_url   = cfg["agent"].get("server_url", "").strip()
         saved_token = cfg["agent"].get("auth_token", "").strip()
+        em          = cfg["agent"].get("email", "").strip()
+        pw_enc      = cfg["agent"].get("pw", "").strip()
+        if saved_url:
+            server_url = saved_url
+        if em:
+            saved_email = em
+        if pw_enc:
+            try:
+                saved_password = base64.b64decode(pw_enc).decode()
+            except Exception:
+                saved_password = None
         if saved_url and saved_token:
             user = validate_token(saved_url, saved_token)
             if user:
                 auth_token   = saved_token
-                server_url   = saved_url
                 current_user = user
                 print(f"Session active: {user['first_name']} {user['last_name']} ({user.get('employee_id', '')})")
+            elif reauthenticate():
+                current_user = validate_token(server_url, auth_token)
+                name = current_user or {}
+                print(f"Re-authenticated with saved credentials ({name.get('employee_id', '') if isinstance(name, dict) else ''}).")
             else:
-                print("Saved token expired — please log in again via the tray icon.")
+                print("Saved session expired — please log in again via the tray icon.")
 
     # Input listeners
     ml = mouse.Listener(on_move=record_activity, on_click=record_activity, on_scroll=record_activity)

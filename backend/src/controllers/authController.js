@@ -5,8 +5,13 @@ const { sendPasswordResetEmail } = require('../utils/mailer');
 const asyncHandler = require('../utils/asyncHandler');
 const { v4: uuidv4 } = require('uuid');
 
-const signToken = (id) =>
-  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '8h' });
+const signToken = (id, expiresIn) =>
+  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: expiresIn || process.env.JWT_EXPIRES_IN || '8h' });
+
+// Desktop-agent logins get a long-lived token so heartbeats don't die mid-shift
+// (a browser session stays short for security). The agent also auto re-logins
+// on expiry as a safety net.
+const AGENT_TOKEN_TTL = process.env.JWT_AGENT_EXPIRES_IN || '30d';
 
 // Safe user fields returned to client — never expose heartbeat/idle monitoring data
 const safeUser = (user) => {
@@ -96,7 +101,7 @@ exports.ssoLogin = asyncHandler(async (req, res) => {
 });
 
 exports.login = asyncHandler(async (req, res) => {
-  const { email, password } = req.body;
+  const { email, password, agent } = req.body;
   if (!email || !password)
     return res.status(400).json({ message: 'Email and password are required' });
 
@@ -110,7 +115,7 @@ exports.login = asyncHandler(async (req, res) => {
   await user.update({ last_login: new Date() });
 
   res.json({
-    token: signToken(user.id),
+    token: signToken(user.id, agent ? AGENT_TOKEN_TTL : undefined),
     user:  safeUser(user),
     password_reset_required: user.password_reset_required,
   });
