@@ -3,8 +3,9 @@ import { useRef, useEffect, useState } from 'react';
 import { idleApi, reportApi, userApi } from '@/api';
 import { formatHMS, formatTime, formatDate } from '@/lib/utils';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
-import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee, Download, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee, Download, ChevronLeft, ChevronRight, BarChart3, Monitor, RefreshCw } from 'lucide-react';
 import toast from 'react-hot-toast';
+import useAuthStore from '@/store/authStore';
 
 const glass   = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
 const glassHi = { background:'rgba(255,255,255,0.06)', border:'1px solid rgba(255,255,255,0.10)', borderRadius:'16px', backdropFilter:'blur(16px)', WebkitBackdropFilter:'blur(16px)' };
@@ -126,7 +127,67 @@ function timeSince(dateStr) {
   return `${Math.floor(diff / 3600)}h ago`;
 }
 
-function UserRow({ user, type }) {
+// Superuser-only live screen viewer. Opening it flags the employee's agent to
+// start capturing; frames are polled every ~2.5s and rendered as they arrive.
+function LiveScreenModal({ userId, name, onClose }) {
+  const [frame, setFrame]   = useState(null);
+  const [capAt, setCapAt]   = useState(null);
+  const [waiting, setWaiting] = useState(true);
+  const [err, setErr]       = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    const tick = async () => {
+      try {
+        const r = await idleApi.screen(userId);
+        if (!active) return;
+        setErr(false);
+        if (r.image) { setFrame(r.image); setCapAt(r.captured_at); setWaiting(false); }
+        else { setWaiting(true); }
+      } catch { if (active) setErr(true); }
+    };
+    idleApi.requestScreen(userId).catch(() => {});  // flag immediately
+    tick();
+    const id = setInterval(tick, 2500);
+    return () => { active = false; clearInterval(id); };
+  }, [userId]);
+
+  const ago = capAt ? Math.max(0, Math.round((Date.now() - capAt) / 1000)) : null;
+
+  return (
+    <div onClick={onClose} style={{ position:'fixed', inset:0, zIndex:60, display:'flex', alignItems:'center', justifyContent:'center', padding:'16px', background:'rgba(4,7,18,0.85)', backdropFilter:'blur(8px)' }}>
+      <div onClick={e => e.stopPropagation()} style={{ background:'rgba(13,17,30,0.98)', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'18px', boxShadow:'0 24px 64px rgba(0,0,0,0.6)', width:'100%', maxWidth:'940px', maxHeight:'92vh', display:'flex', flexDirection:'column' }}>
+        <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'16px 20px', borderBottom:'1px solid rgba(255,255,255,0.07)' }}>
+          <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
+            <div style={{ width:'34px', height:'34px', borderRadius:'10px', background:'linear-gradient(135deg,#A78BFA,#7C3AED)', display:'flex', alignItems:'center', justifyContent:'center' }}><Monitor size={17} color="white" /></div>
+            <div>
+              <p style={{ fontSize:'15px', fontWeight:700, color:'#F1F5F9' }}>Live Screen — {name}</p>
+              <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.4)', marginTop:'2px', display:'flex', alignItems:'center', gap:'6px' }}>
+                <span style={{ width:'7px', height:'7px', borderRadius:'50%', background: frame ? '#34D399' : '#FBBF24', animation:'pulse-glow 2s infinite' }} />
+                {frame ? `Live · frame ${ago}s ago` : 'Waiting for agent…'}
+              </p>
+            </div>
+          </div>
+          <button onClick={onClose} style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'8px', cursor:'pointer', color:'rgba(241,245,249,0.5)', padding:'6px', display:'flex' }}><X size={15} /></button>
+        </div>
+        <div style={{ flex:1, overflow:'auto', padding:'14px', background:'#05070E', display:'flex', alignItems:'center', justifyContent:'center', minHeight:'320px' }}>
+          {frame ? (
+            <img src={`data:image/jpeg;base64,${frame}`} alt="live screen" style={{ maxWidth:'100%', maxHeight:'72vh', borderRadius:'8px', border:'1px solid rgba(255,255,255,0.08)' }} />
+          ) : (
+            <div style={{ textAlign:'center', color:'rgba(241,245,249,0.4)', fontSize:'13px', display:'flex', flexDirection:'column', alignItems:'center', gap:'12px' }}>
+              <RefreshCw size={28} className="spin" color="rgba(167,139,250,0.6)" />
+              {err
+                ? <p>Couldn’t reach the server. Retrying…</p>
+                : <p>Waiting for the agent to send a frame…<br /><span style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)' }}>The employee must be online with desktop agent v1.1+ running.</span></p>}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function UserRow({ user, type, onViewScreen }) {
   const gradients = { disconnected:'linear-gradient(135deg,#334155,#475569)', idle:'linear-gradient(135deg,#EF4444,#F87171)', active:'linear-gradient(135deg,#10B981,#34D399)', break:'linear-gradient(135deg,#F59E0B,#FBBF24)' };
   const glowRgb = { active:'52,211,153', idle:'248,113,113', break:'251,191,36', disconnected:'148,163,184' }[type] || '148,163,184';
 
@@ -169,6 +230,14 @@ function UserRow({ user, type }) {
           <span style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'4px 12px', borderRadius:'7px', fontSize:'11px', fontWeight:700, background:'rgba(52,211,153,0.15)', color:'#34D399', border:'1px solid rgba(52,211,153,0.3)' }}>
             <Activity size={11} /> Active
           </span>
+        )}
+        {onViewScreen && (
+          <button onClick={() => onViewScreen(user)} title="View live screen"
+            style={{ display:'inline-flex', alignItems:'center', gap:'5px', padding:'4px 11px', borderRadius:'7px', fontSize:'11px', fontWeight:700, background:'rgba(167,139,250,0.12)', color:'#A78BFA', border:'1px solid rgba(167,139,250,0.3)', cursor:'pointer', transition:'all 0.15s' }}
+            onMouseEnter={e => e.currentTarget.style.background='rgba(167,139,250,0.22)'}
+            onMouseLeave={e => e.currentTarget.style.background='rgba(167,139,250,0.12)'}>
+            <Monitor size={11} /> Live Screen
+          </button>
         )}
       </div>
     </div>
@@ -392,6 +461,9 @@ function IdleHistoryReport() {
 
 export default function IdleMonitorPage() {
   const [timeline, setTimeline] = useState(null);
+  const [screen, setScreen] = useState(null);
+  const isSuper = useAuthStore(s => s.user?.role) === 'superuser';
+  const viewScreen = isSuper ? (u) => setScreen({ userId: u.user_id, name: `${u.first_name} ${u.last_name}` }) : undefined;
 
   const { data:live, dataUpdatedAt } = useQuery({ queryKey:['idle-live'], queryFn:idleApi.live, refetchInterval:30000 });
 
@@ -510,7 +582,7 @@ export default function IdleMonitorPage() {
                   </p>
                   <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.2)', marginTop:'2px' }}>On an active break — idle time is not counted</p>
                 </div>
-                {onBreak.map((u) => <UserRow key={u.user_id} user={u} type="break" />)}
+                {onBreak.map((u) => <UserRow key={u.user_id} user={u} type="break" onViewScreen={viewScreen} />)}
               </div>
             )}
             {idle.length > 0 && (
@@ -521,7 +593,7 @@ export default function IdleMonitorPage() {
                   </p>
                   <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.2)', marginTop:'2px' }}>Agent online but no keyboard/mouse activity detected</p>
                 </div>
-                {idle.map((u) => <UserRow key={u.user_id} user={u} type="idle" />)}
+                {idle.map((u) => <UserRow key={u.user_id} user={u} type="idle" onViewScreen={viewScreen} />)}
               </div>
             )}
             {active.length > 0 && (
@@ -532,7 +604,7 @@ export default function IdleMonitorPage() {
                   </p>
                   <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.2)', marginTop:'2px' }}>Agent sending regular heartbeats with active usage</p>
                 </div>
-                {active.map((u) => <UserRow key={u.user_id} user={u} type="active" />)}
+                {active.map((u) => <UserRow key={u.user_id} user={u} type="active" onViewScreen={viewScreen} />)}
               </div>
             )}
           </>
@@ -611,6 +683,7 @@ export default function IdleMonitorPage() {
       <IdleHistoryReport />
 
       {timeline && <IdleTimelineModal userId={timeline.userId} date={timeline.date} name={timeline.name} onClose={() => setTimeline(null)} />}
+      {screen && <LiveScreenModal userId={screen.userId} name={screen.name} onClose={() => setScreen(null)} />}
     </div>
   );
 }

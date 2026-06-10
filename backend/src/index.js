@@ -18,7 +18,7 @@ const io = new Server(httpServer, {
 // Security & parsing
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'same-origin' } }));
 app.use(cors({ origin: process.env.CLIENT_URL || 'http://localhost:5173', credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '8mb' }));   // raised for base64 photos & live-screen frames
 app.use(morgan('combined'));
 app.set('trust proxy', 1);
 

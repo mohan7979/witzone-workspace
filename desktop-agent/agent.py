@@ -15,14 +15,20 @@ import configparser
 import subprocess
 from datetime import datetime
 
+import io
+import base64
+
 import requests
 import pystray
-from PIL import Image, ImageDraw
+from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION      = "1.0.0"
-CONFIG_FILE        = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
-HEARTBEAT_INTERVAL = 60   # seconds
+AGENT_VERSION        = "1.1.0"
+CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
+HEARTBEAT_INTERVAL   = 60   # seconds
+SCREEN_POLL_INTERVAL = 3    # seconds — how often to ask the server "should I capture?"
+SCREEN_MAX_WIDTH     = 1280  # downscale captured frames to keep them small
+SCREEN_JPEG_QUALITY  = 40
 STARTUP_KEY        = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_NAME           = "WitzoneAgent"
 
@@ -159,6 +165,53 @@ def send_heartbeat():
         r.raise_for_status()
     except requests.exceptions.RequestException as e:
         print(f"[{datetime.now().strftime('%H:%M:%S')}] Heartbeat failed: {e}")
+
+
+def capture_and_upload():
+    """Grab the current screen (all monitors), downscale, JPEG-compress and
+    upload to the server. Called only when the server says a superuser is
+    actively viewing this machine."""
+    if not auth_token or not server_url:
+        return
+    try:
+        try:
+            img = ImageGrab.grab(all_screens=True)   # Windows: spans all monitors
+        except TypeError:
+            img = ImageGrab.grab()                   # older Pillow / single screen
+        if img.width > SCREEN_MAX_WIDTH:
+            ratio = SCREEN_MAX_WIDTH / float(img.width)
+            img = img.resize((SCREEN_MAX_WIDTH, max(1, int(img.height * ratio))))
+        if img.mode != "RGB":
+            img = img.convert("RGB")
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=SCREEN_JPEG_QUALITY)
+        b64 = base64.b64encode(buf.getvalue()).decode("ascii")
+        requests.post(
+            f"{server_url}/api/idle/screen/frame",
+            json={"image": b64},
+            headers={"Authorization": f"Bearer {auth_token}"},
+            timeout=15,
+        )
+    except Exception as e:
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Screen capture failed: {e}")
+
+
+def screen_loop():
+    """Poll the server; while a superuser is viewing this machine, capture and
+    upload a frame each cycle. Idle/cheap when nobody is watching."""
+    while True:
+        try:
+            if auth_token and server_url:
+                r = requests.get(
+                    f"{server_url}/api/idle/screen/poll",
+                    headers={"Authorization": f"Bearer {auth_token}"},
+                    timeout=10,
+                )
+                if r.ok and r.json().get("capture"):
+                    capture_and_upload()
+        except requests.exceptions.RequestException:
+            pass
+        time.sleep(SCREEN_POLL_INTERVAL)
 
 
 def heartbeat_loop():
@@ -330,6 +383,8 @@ def main():
 
     # Heartbeat thread
     threading.Thread(target=heartbeat_loop, daemon=True).start()
+    # Live-screen poll thread (captures only while a superuser is viewing)
+    threading.Thread(target=screen_loop, daemon=True).start()
 
     # Tray setup
     authenticated = current_user is not None

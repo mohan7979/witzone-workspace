@@ -60,6 +60,9 @@ export const idleApi = {
   detail: (params) => api.get('/idle/detail', { params }),
   teamSummary: (params) => api.get('/idle/team', { params }),
   live: () => api.get('/idle/live'),
+  // Live screen viewing (superuser-only)
+  screen:        (userId) => api.get(`/idle/screen/${userId}`),
+  requestScreen: (userId) => api.post(`/idle/screen/request/${userId}`),
 };
 
 export const reportApi = {
