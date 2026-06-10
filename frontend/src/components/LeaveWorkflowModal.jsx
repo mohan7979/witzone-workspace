@@ -69,17 +69,20 @@ export default function LeaveWorkflowModal({ leave, onClose }) {
     stages.push({ tone:'pending', title:'Pending Team Lead Approval' });
   }
 
-  // 3) Final (HR / Superuser) stage — only if TL didn't end the flow
-  if (leave.tl_status !== 'rejected') {
-    if (leave.status === 'approved') {
-      stages.push({ tone:'done', title:'Final Approval Granted', who: fullName(leave.reviewer) ? `By ${fullName(leave.reviewer)}` : undefined, when: dt(leave.reviewed_at), comment: leave.reviewer_comment });
-    } else if (leave.status === 'rejected') {
-      stages.push({ tone:'reject', title:'Rejected at Final Approval', who: fullName(leave.reviewer) ? `By ${fullName(leave.reviewer)}` : undefined, when: dt(leave.reviewed_at), comment: leave.reviewer_comment });
-    } else if (leave.status === 'cancelled') {
-      stages.push({ tone:'muted', title:'Request Cancelled' });
-    } else {
-      stages.push({ tone:'pending', title: (leave.tl_status === 'approved' || leave.tl_skipped) ? 'Pending HR / Superuser Approval' : 'Final Approval' });
-    }
+  // 3) HR / Superuser stage — independent of the TL (parallel approval)
+  if (leave.hr_status === 'approved') {
+    stages.push({ tone:'done', title:'Approved by HR / Superuser', who: fullName(leave.reviewer) ? `By ${fullName(leave.reviewer)}` : undefined, when: dt(leave.reviewed_at), comment: leave.reviewer_comment });
+  } else if (leave.hr_status === 'rejected') {
+    stages.push({ tone:'reject', title:'Rejected by HR / Superuser', who: fullName(leave.reviewer) ? `By ${fullName(leave.reviewer)}` : undefined, when: dt(leave.reviewed_at), comment: leave.reviewer_comment });
+  } else if (leave.status === 'cancelled') {
+    stages.push({ tone:'muted', title:'Request Cancelled' });
+  } else {
+    stages.push({ tone:'pending', title:'Pending HR / Superuser Approval' });
+  }
+
+  // 4) Final outcome marker once fully approved
+  if (leave.status === 'approved') {
+    stages.push({ tone:'done', title:'Fully Approved' });
   }
 
   const rows = [

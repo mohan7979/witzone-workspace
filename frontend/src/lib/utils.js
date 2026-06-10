@@ -108,10 +108,12 @@ export const leaveStage = (leave) => {
     return leave.tl_status === 'rejected'
       ? { label: 'Rejected by TL', kind: 'rejected' }
       : { label: 'Rejected by HR', kind: 'rejected' };
-  // pending
-  if (leave.tl_status === 'approved' || leave.tl_skipped)
-    return { label: 'Pending HR Approval', kind: 'pending' };
-  return { label: 'Pending TL Approval', kind: 'pending' };
+  // pending — TL and HR approve in parallel (either order)
+  const tlDone = leave.tl_status === 'approved' || leave.tl_skipped;
+  const hrDone = leave.hr_status === 'approved';
+  if (tlDone && !hrDone) return { label: 'Pending HR Approval', kind: 'pending' };
+  if (!tlDone && hrDone) return { label: 'Pending TL Approval', kind: 'pending' };
+  return { label: 'Pending TL & HR Approval', kind: 'pending' };
 };
 
 export const getStatusColor = (status) => {

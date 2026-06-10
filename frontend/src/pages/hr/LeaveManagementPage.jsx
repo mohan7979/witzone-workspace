@@ -140,18 +140,32 @@ function ReviewModal({ leave, role, onClose }) {
             )}
           </div>
 
-          {/* Approval chain visual */}
-          <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 14px', background:'rgba(255,255,255,0.03)', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.05)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color: isTL ? '#FBBF24' : (leave.tl_skipped ? 'rgba(203,213,225,0.7)' : 'rgba(16,185,129,0.9)') }}>
-              <div style={{ width:'8px', height:'8px', borderRadius:'50%', background: isTL ? '#FBBF24' : (leave.tl_skipped ? 'rgba(148,163,184,0.6)' : '#10B981') }} />
-              TL Review {isTL ? '← You are here' : (leave.tl_skipped ? '— skipped (no TL)' : '✓ Done')}
-            </div>
-            <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
-            <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color: isTL ? 'rgba(241,245,249,0.25)' : '#818CF8' }}>
-              <div style={{ width:'8px', height:'8px', borderRadius:'50%', background: isTL ? 'rgba(255,255,255,0.15)' : '#818CF8' }} />
-              {isSuper ? 'Superuser Final' : 'HR Final'} {!isTL ? '← You are here' : ''}
-            </div>
-          </div>
+          {/* Approval chain visual — TL and HR are independent (parallel) */}
+          {(() => {
+            const tlState = leave.tl_skipped ? { c:'rgba(203,213,225,0.7)', d:'rgba(148,163,184,0.6)', t:'— no TL' }
+              : leave.tl_status === 'approved' ? { c:'rgba(16,185,129,0.9)', d:'#10B981', t:'✓ Approved' }
+              : leave.tl_status === 'rejected' ? { c:'#F87171', d:'#F87171', t:'✗ Rejected' }
+              : isTL ? { c:'#FBBF24', d:'#FBBF24', t:'← You are here' }
+              : { c:'rgba(241,245,249,0.3)', d:'rgba(255,255,255,0.15)', t:'Pending' };
+            const hrState = leave.hr_status === 'approved' ? { c:'rgba(16,185,129,0.9)', d:'#10B981', t:'✓ Approved' }
+              : leave.hr_status === 'rejected' ? { c:'#F87171', d:'#F87171', t:'✗ Rejected' }
+              : !isTL ? { c:'#818CF8', d:'#818CF8', t:'← You are here' }
+              : { c:'rgba(241,245,249,0.3)', d:'rgba(255,255,255,0.15)', t:'Pending' };
+            const hrLabel = isSuper ? 'Superuser' : 'HR';
+            return (
+              <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 14px', background:'rgba(255,255,255,0.03)', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.05)' }}>
+                <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color:tlState.c }}>
+                  <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:tlState.d }} />
+                  TL {tlState.t}
+                </div>
+                <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
+                <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color:hrState.c }}>
+                  <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:hrState.d }} />
+                  {hrLabel} {hrState.t}
+                </div>
+              </div>
+            );
+          })()}
 
           <div>
             <label style={S.label}>Remarks <span style={{ color:'rgba(241,245,249,0.25)', textTransform:'none', fontWeight:400 }}>(optional)</span></label>
@@ -226,12 +240,16 @@ export default function LeaveManagementPage() {
       ? 'Approve or reject leave & permission requests submitted by Team Leads and HR'
       : 'Final approval for TL-reviewed employee leave requests';
 
-  // Can review: Lead acts only on its own queue (tl_status still null, not skipped);
-  // HR / Superuser act once the TL has approved OR there was no TL (tl_skipped).
+  // Parallel review: TL acts while tl_status is null; HR/Superuser act while
+  // hr_status is null — neither waits for the other.
   const canReview = (leave) => {
     if (leave.status !== 'pending') return false;
     if (isLead)    return leave.tl_status === null && !leave.tl_skipped;
-    if (isHRLevel) return leave.tl_status === 'approved' || leave.tl_skipped;
+    if (isHRLevel) {
+      if (leave.hr_status != null) return false;
+      if (!isSuper && leave.user?.role && leave.user.role !== 'employee') return false; // HR → employees only
+      return true;
+    }
     return false;
   };
 

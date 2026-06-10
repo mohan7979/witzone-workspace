@@ -10,6 +10,9 @@ const Leave = sequelize.define('Leave', {
   reviewer_comment: { type: DataTypes.TEXT },
   reviewed_at:      { type: DataTypes.DATE },
 
+  // HR / Superuser decision (parallel with TL — separate from the final `status`)
+  hr_status:      { type: DataTypes.ENUM('approved', 'rejected'), allowNull: true },
+
   // TL (Level-1) reviewer
   tl_reviewed_by: { type: DataTypes.UUID },
   tl_status:      { type: DataTypes.ENUM('approved', 'rejected'), allowNull: true },

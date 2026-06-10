@@ -179,6 +179,13 @@ exports.sendLeaveNotificationEmail = (email, employee, leave, action) => {
       body: `Your ${span} has been <span style="color:#10b981;font-weight:700">approved by your Team Lead</span> and is now awaiting final HR approval.`,
       extra: leave.tl_comment ? `<p style="color:#64748b;font-size:13px">Team Lead Comment: ${leave.tl_comment}</p>` : '',
     },
+    hr_approved: {
+      subject: '✅ Your Leave was Approved by HR — Pending Team Lead',
+      color: '#10b981',
+      title: 'HR Approved',
+      body: `Your ${span} has been <span style="color:#10b981;font-weight:700">approved by HR</span> and is now awaiting your Team Lead's approval.`,
+      extra: leave.reviewer_comment ? `<p style="color:#64748b;font-size:13px">HR Comment: ${leave.reviewer_comment}</p>` : '',
+    },
     tl_rejected: {
       subject: '❌ Your Leave Request was Declined by Your Team Lead',
       color: '#f59e0b',

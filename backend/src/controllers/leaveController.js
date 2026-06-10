@@ -28,6 +28,73 @@ const LEAVE_BALANCE_FIELDS = {
 
 const VALID_TYPES = Object.keys(LEAVE_POLICY);
 
+// Deduct the leave balance + mark attendance "on_leave" for a fully-approved leave.
+async function finalizeApprovedLeave(leave) {
+  const balanceField = LEAVE_BALANCE_FIELDS[leave.type];
+  if (balanceField && leave.user) {
+    const newBalance = parseFloat(leave.user[balanceField]) - parseFloat(leave.duration_days);
+    await leave.user.update({ [balanceField]: Math.max(0, newBalance) });
+  }
+  let curr = moment(leave.start_date);
+  const endDate = moment(leave.end_date);
+  while (curr.isSameOrBefore(endDate)) {
+    const day = curr.format('YYYY-MM-DD');
+    const existing = await Attendance.findOne({ where: { user_id: leave.user_id, date: day } });
+    if (!existing) await Attendance.create({ user_id: leave.user_id, date: day, status: 'on_leave' });
+    else if (!existing.login_time) await existing.update({ status: 'on_leave' });
+    curr.add(1, 'day');
+  }
+}
+
+/**
+ * Parallel two-level approval. TL and HR can each review at ANY time, in any
+ * order. The leave is finally approved only when BOTH have approved (a leave with
+ * no TL — tl_skipped — needs only the HR/Superuser approval); it's rejected the
+ * moment either side rejects. Fires the appropriate notifications.
+ */
+async function resolveLeaveDecision(leave, actor, { stage }) {
+  const tlOk     = leave.tl_status === 'approved' || leave.tl_skipped;
+  const hrOk     = leave.hr_status === 'approved';
+  const rejected = leave.tl_status === 'rejected' || leave.hr_status === 'rejected';
+
+  if (rejected) {
+    if (leave.status !== 'rejected') await leave.update({ status: 'rejected' });
+    const byTl = leave.tl_status === 'rejected';
+    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, byTl ? 'tl_rejected' : 'rejected').catch(() => {});
+    return 'rejected';
+  }
+
+  if (tlOk && hrOk) {
+    if (leave.status !== 'approved') {
+      await finalizeApprovedLeave(leave);
+      await leave.update({ status: 'approved' });
+    }
+    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'approved').catch(() => {});
+    // FYI to the other reviewer who isn't acting now.
+    const otherId = stage === 'hr' ? leave.tl_reviewed_by : leave.reviewed_by;
+    if (otherId && String(otherId) !== String(actor.id)) {
+      const other = await User.findByPk(otherId, { attributes: ['email', 'first_name', 'last_name'] });
+      if (other) sendReviewerOutcomeEmail(other.email, `${other.first_name} ${other.last_name}`, leave.user, leave, 'approved', 'Approval').catch(() => {});
+    }
+    return 'approved';
+  }
+
+  // Still pending — one side approved, the other hasn't reviewed yet.
+  if (stage === 'tl') {
+    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'tl_approved').catch(() => {});
+    const tlName = `${actor.first_name} ${actor.last_name}`;
+    const hrs = await User.findAll({ where: { role: 'hr', status: 'active' } });
+    for (const hr of hrs) sendHrNotificationEmail(hr.email, leave.user, leave, tlName).catch(() => {});
+  } else {
+    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'hr_approved').catch(() => {});
+    if (leave.user.manager_id) {
+      const tl = await User.findByPk(leave.user.manager_id, { attributes: ['email', 'first_name', 'last_name'] });
+      if (tl) sendTlNotificationEmail(tl.email, leave.user, leave).catch(() => {});
+    }
+  }
+  return 'pending';
+}
+
 // ─── Apply for leave ──────────────────────────────────────────────────────────
 exports.apply = asyncHandler(async (req, res) => {
   const { type, start_date, end_date, start_time, end_time, reason, document_note } = req.body;
@@ -208,37 +275,35 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
 
   if (type) leaveWhere.type = type;
 
+  // Parallel approval: TL and HR each have their own pending queue and act in any
+  // order. A request shows in a reviewer's "pending" queue until THEY decide it.
   if (isLead) {
-    // Lead sees only leaves pending their TL review (tl_status = null)
     userWhere.manager_id = req.user.id;
     if (status && status !== 'pending') {
-      // Historical view — show their team's leaves with any status
       if (status !== 'all') leaveWhere.status = status;
     } else {
       leaveWhere.status    = 'pending';
-      leaveWhere.tl_status = null;
+      leaveWhere.tl_status = null;          // awaiting THIS TL's review (HR may already have acted)
     }
   } else if (isHR) {
     if (!status || status === 'pending') {
-      // HR finalises EMPLOYEE leaves once the TL has approved (or there was no TL).
-      // Requests submitted by TLs / HR are routed to the Superuser instead.
-      leaveWhere.status = 'pending';
-      leaveWhere[Op.or] = [{ tl_status: 'approved' }, { tl_skipped: true }];
-      userWhere.role    = 'employee';
+      // HR can review EMPLOYEE leaves at any time — no longer waits for the TL.
+      leaveWhere.status    = 'pending';
+      leaveWhere.hr_status = null;          // awaiting HR's review
+      userWhere.role       = 'employee';
     } else if (status === 'all') {
-      // No filter — full visibility for reporting
+      // full visibility
     } else {
       leaveWhere.status = status;
     }
   } else if (isSuper) {
     if (!status || status === 'pending') {
-      // Superuser's actionable queue: leaves submitted by TLs / HR / other
-      // superusers, awaiting a final decision.
-      leaveWhere.status = 'pending';
-      leaveWhere[Op.or] = [{ tl_status: 'approved' }, { tl_skipped: true }];
-      userWhere.role    = { [Op.in]: ['lead', 'hr', 'superuser'] };
+      // Superuser is the final approver for TL / HR / superuser requests.
+      leaveWhere.status    = 'pending';
+      leaveWhere.hr_status = null;
+      userWhere.role       = { [Op.in]: ['lead', 'hr', 'superuser'] };
     } else if (status === 'all') {
-      // Full visibility across the whole organisation
+      // full visibility
     } else {
       leaveWhere.status = status;
     }
@@ -287,8 +352,6 @@ exports.tlReview = asyncHandler(async (req, res) => {
     tl_reviewed_by: req.user.id,
     tl_comment:     comment || null,
     tl_reviewed_at: new Date(),
-    // TL rejection ends the flow immediately
-    ...(action === 'rejected' ? { status: 'rejected', reviewed_by: req.user.id, reviewer_comment: comment, reviewed_at: new Date() } : {}),
   });
 
   await recordAudit(req.user, 'leave.tl_review', {
@@ -298,21 +361,11 @@ exports.tlReview = asyncHandler(async (req, res) => {
     metadata: { decision: action, comment: comment || null, stage: 'tl' },
   });
 
-  if (action === 'approved') {
-    // Notify all HR users for final decision
-    const hrs = await User.findAll({ where: { role: 'hr', status: 'active' } });
-    const tlName = `${req.user.first_name} ${req.user.last_name}`;
-    for (const hr of hrs) {
-      sendHrNotificationEmail(hr.email, leave.user, leave, tlName).catch(() => {});
-    }
-    // Keep the employee informed: TL approved, now pending HR.
-    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'tl_approved').catch(() => {});
-    res.json({ message: 'Leave forwarded to HR for final approval', leave });
-  } else {
-    // Notify employee of TL rejection
-    sendLeaveNotificationEmail(leave.user.email, leave.user, leave, 'tl_rejected').catch(() => {});
-    res.json({ message: 'Leave rejected', leave });
-  }
+  const result = await resolveLeaveDecision(leave, req.user, { stage: 'tl' });
+  const message = action === 'rejected'
+    ? 'Leave rejected'
+    : result === 'approved' ? 'Leave approved (both approvals complete)' : 'Approved — awaiting HR review';
+  res.json({ message, leave });
 });
 
 // ─── HR Level-2 final review ──────────────────────────────────────────────────
@@ -327,8 +380,8 @@ exports.hrReview = asyncHandler(async (req, res) => {
   if (!leave) return res.status(404).json({ message: 'Leave not found' });
   if (leave.status !== 'pending')
     return res.status(400).json({ message: 'Leave is no longer pending' });
-  if (leave.tl_status !== 'approved' && !leave.tl_skipped)
-    return res.status(400).json({ message: 'TL approval is required before HR can act' });
+  if (leave.hr_status !== null)
+    return res.status(400).json({ message: 'You have already reviewed this request' });
 
   // Separation of duties: leaves submitted by TLs / HR / superusers can only be
   // finalised by a Superuser. HR finalises employee leaves only.
@@ -337,50 +390,24 @@ exports.hrReview = asyncHandler(async (req, res) => {
     return res.status(403).json({ message: 'Leave requests from Team Leads or HR can only be reviewed by a Superuser.' });
 
   await leave.update({
-    status:           action,
+    hr_status:        action,
     reviewed_by:      req.user.id,
     reviewer_comment: comment || null,
     reviewed_at:      new Date(),
   });
 
-  if (action === 'approved') {
-    const balanceField = LEAVE_BALANCE_FIELDS[leave.type];
-    if (balanceField) {
-      const user = leave.user;
-      const newBalance = parseFloat(user[balanceField]) - parseFloat(leave.duration_days);
-      await user.update({ [balanceField]: Math.max(0, newBalance) });
-    }
-
-    let curr = moment(leave.start_date);
-    const endDate = moment(leave.end_date);
-    while (curr.isSameOrBefore(endDate)) {
-      const day = curr.format('YYYY-MM-DD');
-      const existing = await Attendance.findOne({ where: { user_id: leave.user_id, date: day } });
-      if (!existing) {
-        await Attendance.create({ user_id: leave.user_id, date: day, status: 'on_leave' });
-      } else if (!existing.login_time) {
-        await existing.update({ status: 'on_leave' });
-      }
-      curr.add(1, 'day');
-    }
-  }
-
   await recordAudit(req.user, 'leave.hr_review', {
     entity_type: 'leave', entity_id: leave.id,
     entity_label: `${leave.user.first_name} ${leave.user.last_name} · ${leave.type}`,
-    new_value: `HR ${action}`,
+    new_value: `${isSuper ? 'Superuser' : 'HR'} ${action}`,
     metadata: { decision: action, comment: comment || null, stage: 'hr', tl_skipped: leave.tl_skipped },
   });
 
-  // Notify the requester of the final outcome.
-  sendLeaveNotificationEmail(leave.user.email, leave.user, leave, action).catch(() => {});
-  // FYI to the TL who reviewed it (if any, and not the same person acting now).
-  if (leave.tl_reviewed_by && String(leave.tl_reviewed_by) !== String(req.user.id)) {
-    const tl = await User.findByPk(leave.tl_reviewed_by, { attributes: ['email', 'first_name', 'last_name'] });
-    if (tl) sendReviewerOutcomeEmail(tl.email, `${tl.first_name} ${tl.last_name}`, leave.user, leave, action,
-      req.user.role === 'superuser' ? 'Superuser' : 'HR').catch(() => {});
-  }
-  res.json({ message: `Leave ${action}`, leave });
+  const result = await resolveLeaveDecision(leave, req.user, { stage: 'hr' });
+  const message = action === 'rejected'
+    ? 'Leave rejected'
+    : result === 'approved' ? 'Leave approved (both approvals complete)' : 'Approved — awaiting Team Lead review';
+  res.json({ message, leave });
 });
 
 // ─── View the uploaded document (e.g. sick-leave medical certificate) ─────────
