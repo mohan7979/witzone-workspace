@@ -273,12 +273,31 @@ exports.liveIdleStatus = asyncHandler(async (req, res) => {
   const now       = nowIST().toDate();
   const threshold = new Date(now - OFFLINE_THRESHOLD_MS);
   const today     = todayIST();
+  const yesterday = nowIST().subtract(1, 'day').format('YYYY-MM-DD');
 
   const userWhere = { status: 'active' };
   if (req.user.role === 'lead') userWhere.manager_id = req.user.id;
 
+  // Everyone clocked in today, PLUS anyone still inside an open session that
+  // began the previous day (a night shift that crossed midnight). Without the
+  // second branch the monitor goes empty right after 00:00 for overnight staff.
   const clockedIn = await Attendance.findAll({
-    where: { date: today, login_time: { [Op.ne]: null } },
+    where: {
+      login_time: { [Op.ne]: null },
+      [Op.or]: [
+        { date: today },
+        {
+          [Op.and]: [
+            { date: { [Op.gte]: yesterday } },
+            { [Op.or]: [
+              { logout_time: null },                                          // session 1 still open
+              { login_time_2: { [Op.ne]: null }, logout_time_2: null },        // session 2 still open
+            ] },
+          ],
+        },
+      ],
+    },
+    order: [['date', 'DESC']],
     include: [{
       model: User, as: 'user', where: userWhere,
       attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'last_heartbeat', 'last_idle_seconds'],
@@ -286,15 +305,17 @@ exports.liveIdleStatus = asyncHandler(async (req, res) => {
   });
 
   const active = [], idle = [], breaks = [], disconnected = [];
+  const seen = new Set();   // a user can't have both an open prior-day session and a today row, but guard anyway
 
   for (const att of clockedIn) {
     const user = att.user;
-    if (!user) continue;
+    if (!user || seen.has(user.id)) continue;
 
     // "Live" = currently inside an open session (session 1 OR session 2).
     const s1Active = att.login_time   && !att.logout_time;
     const s2Active = att.login_time_2 && !att.logout_time_2;
     if (!s1Active && !s2Active) continue;   // fully clocked out → not live
+    seen.add(user.id);
 
     const hb = user.last_heartbeat ? new Date(user.last_heartbeat) : null;
     const entry = {
