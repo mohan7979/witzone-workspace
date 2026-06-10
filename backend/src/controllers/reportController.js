@@ -98,6 +98,116 @@ exports.idleReport = asyncHandler(async (req, res) => {
   res.json({ start: startDate, end: endDate, data });
 });
 
+// Resolve a [start, end] window (YYYY-MM-DD) for a reporting period from an anchor date.
+function periodWindow(period, anchor) {
+  const a = moment(anchor, 'YYYY-MM-DD', true).isValid() ? moment(anchor, 'YYYY-MM-DD') : moment();
+  switch (period) {
+    case 'weekly':  return [a.clone().startOf('isoWeek'), a.clone().endOf('isoWeek')];
+    case 'monthly': return [a.clone().startOf('month'),   a.clone().endOf('month')];
+    case 'yearly':  return [a.clone().startOf('year'),    a.clone().endOf('year')];
+    case 'daily':
+    default:        return [a.clone().startOf('day'),     a.clone().endOf('day')];
+  }
+}
+
+/**
+ * Idle Monitor historical report — idle, work, break & effective time aggregated
+ * per employee over a period (daily | weekly | monthly | yearly), optionally
+ * scoped global (all in the requester's reach), to one department, or to a single
+ * employee. Leads are auto-restricted to their own team via buildUserWhere.
+ */
+exports.idleHistory = asyncHandler(async (req, res) => {
+  const period = ['daily', 'weekly', 'monthly', 'yearly'].includes(req.query.period) ? req.query.period : 'monthly';
+  const { date, department, user_id } = req.query;
+  const [startM, endM] = periodWindow(period, date);
+  const startDate = startM.format('YYYY-MM-DD');
+  const endDate   = endM.format('YYYY-MM-DD');
+
+  const userWhere = buildUserWhere(req);
+  if (department) userWhere.department = department;
+  if (user_id)    userWhere.id = user_id;
+
+  const scope = user_id ? 'employee' : department ? 'department' : 'global';
+  const zeroTotals = { employees: 0, idle_seconds: 0, idle_events: 0, long_idle: 0, break_seconds: 0, work_hours: 0, effective_hours: 0, present_days: 0 };
+
+  // Universe of employees in scope
+  const users = await User.findAll({
+    where: userWhere,
+    attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department'],
+    raw: true,
+  });
+  if (!users.length) {
+    return res.json({ period, start: startDate, end: endDate, scope, totals: zeroTotals, data: [] });
+  }
+  const userMap = {};
+  const scopedIds = [];
+  for (const u of users) { userMap[u.id] = u; scopedIds.push(u.id); }
+
+  // Idle aggregation (IdleLog)
+  const idleRows = await IdleLog.findAll({
+    where: { date: { [Op.between]: [startDate, endDate] }, user_id: { [Op.in]: scopedIds } },
+    attributes: [
+      'user_id',
+      [fn('SUM', col('idle_seconds')), 'idle_seconds'],
+      [fn('COUNT', col('id')), 'idle_events'],
+      [fn('SUM', literal('CASE WHEN idle_seconds >= 1800 THEN 1 ELSE 0 END')), 'long_idle'],
+    ],
+    group: ['user_id'],
+    raw: true,
+  });
+  const idleMap = {};
+  for (const r of idleRows) idleMap[r.user_id] = r;
+
+  // Work / break / present-days (Attendance)
+  const attRows = await Attendance.findAll({
+    where: { date: { [Op.between]: [startDate, endDate] }, user_id: { [Op.in]: scopedIds } },
+    attributes: [
+      'user_id',
+      [fn('SUM', col('total_hours')), 'work_hours'],
+      [fn('SUM', col('total_break_seconds')), 'break_seconds'],
+      [fn('SUM', literal("CASE WHEN status IN ('present','half_day') THEN 1 ELSE 0 END")), 'present_days'],
+    ],
+    group: ['user_id'],
+    raw: true,
+  });
+  const attMap = {};
+  for (const r of attRows) attMap[r.user_id] = r;
+
+  // Merge — keep only employees with activity in the window
+  const totals = { ...zeroTotals };
+  const data = [];
+  for (const id of scopedIds) {
+    const idle = idleMap[id], att = attMap[id];
+    if (!idle && !att) continue;
+    const idle_seconds  = parseInt(idle?.idle_seconds  || 0, 10);
+    const idle_events   = parseInt(idle?.idle_events   || 0, 10);
+    const long_idle     = parseInt(idle?.long_idle     || 0, 10);
+    const break_seconds = parseInt(att?.break_seconds  || 0, 10);
+    const work_hours    = parseFloat(att?.work_hours   || 0);
+    const present_days  = parseInt(att?.present_days   || 0, 10);
+    const effective_hours = parseFloat(Math.max(0, work_hours - idle_seconds / 3600).toFixed(2));
+    data.push({
+      user: userMap[id],
+      idle_seconds, idle_events, long_idle, break_seconds, present_days,
+      work_hours: parseFloat(work_hours.toFixed(2)),
+      effective_hours,
+      avg_idle_seconds: present_days ? Math.round(idle_seconds / present_days) : idle_seconds,
+    });
+    totals.employees    += 1;
+    totals.idle_seconds += idle_seconds;
+    totals.idle_events  += idle_events;
+    totals.long_idle    += long_idle;
+    totals.break_seconds+= break_seconds;
+    totals.work_hours   += work_hours;
+    totals.present_days += present_days;
+  }
+  totals.work_hours      = parseFloat(totals.work_hours.toFixed(2));
+  totals.effective_hours = parseFloat(Math.max(0, totals.work_hours - totals.idle_seconds / 3600).toFixed(2));
+
+  data.sort((a, b) => b.idle_seconds - a.idle_seconds);
+  res.json({ period, start: startDate, end: endDate, scope, totals, data });
+});
+
 // Pending-leave count scoped to what THIS role actually acts on — kept identical
 // to leaveController.pendingLeaves so the dashboard stat matches the list.
 async function countActionablePending(req) {

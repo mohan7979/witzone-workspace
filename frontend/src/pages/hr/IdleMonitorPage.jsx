@@ -1,9 +1,9 @@
 import { useQuery } from '@tanstack/react-query';
 import { useRef, useEffect, useState } from 'react';
-import { idleApi } from '@/api';
+import { idleApi, reportApi, userApi } from '@/api';
 import { formatHMS, formatTime, formatDate } from '@/lib/utils';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
-import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee, Download, ChevronLeft, ChevronRight, BarChart3 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const glass   = { background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'16px', backdropFilter:'blur(12px)', WebkitBackdropFilter:'blur(12px)' };
@@ -171,6 +171,221 @@ function UserRow({ user, type }) {
           </span>
         )}
       </div>
+    </div>
+  );
+}
+
+const PERIODS = [
+  { key: 'daily',   label: 'Daily' },
+  { key: 'weekly',  label: 'Weekly' },
+  { key: 'monthly', label: 'Monthly' },
+  { key: 'yearly',  label: 'Yearly' },
+];
+const SCOPES = [
+  { key: 'global',     label: 'Global' },
+  { key: 'department', label: 'Department' },
+  { key: 'employee',   label: 'Employee' },
+];
+
+const fmtHours = (h) => {
+  const n = Number(h) || 0;
+  const hh = Math.floor(n);
+  const mm = Math.round((n - hh) * 60);
+  return `${hh}h ${mm}m`;
+};
+
+const selectStyle = {
+  background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.12)',
+  borderRadius: '9px', color: '#F1F5F9', fontSize: '13px', fontWeight: 600,
+  padding: '8px 12px', cursor: 'pointer', outline: 'none', minWidth: '180px',
+};
+
+// Period × scope historical idle / work report (deferred item #6).
+function IdleHistoryReport() {
+  const [period, setPeriod] = useState('monthly');
+  const [anchor, setAnchor] = useState(() => new Date().toISOString().split('T')[0]);
+  const [scope, setScope]   = useState('global');
+  const [dept, setDept]     = useState('');
+  const [emp, setEmp]       = useState('');
+
+  const { data: deptData } = useQuery({ queryKey: ['idle-rep-depts'], queryFn: userApi.departments, staleTime: 300000 });
+  const departments = deptData?.departments || [];
+  const { data: empData } = useQuery({ queryKey: ['idle-rep-emps'], queryFn: () => userApi.list({ limit: 300, status: 'active' }), staleTime: 300000, enabled: scope === 'employee' });
+  const employees = empData?.data || [];
+
+  const params = { period, date: anchor };
+  if (scope === 'department' && dept) params.department = dept;
+  if (scope === 'employee'   && emp)  params.user_id = emp;
+
+  const { data, isFetching } = useQuery({
+    queryKey: ['idle-history', period, anchor, scope, dept, emp],
+    queryFn: () => reportApi.idleHistory(params),
+    keepPreviousData: true,
+  });
+
+  const shiftAnchor = (dir) => {
+    const d = new Date(anchor + 'T00:00:00');
+    if (period === 'daily')   d.setDate(d.getDate() + dir);
+    if (period === 'weekly')  d.setDate(d.getDate() + dir * 7);
+    if (period === 'monthly') d.setMonth(d.getMonth() + dir);
+    if (period === 'yearly')  d.setFullYear(d.getFullYear() + dir);
+    setAnchor(d.toISOString().split('T')[0]);
+  };
+
+  const rows   = data?.data   || [];
+  const totals = data?.totals || {};
+  const tc = useTableControls(rows, {
+    searchKeys: ['user.first_name', 'user.last_name', 'user.employee_id', 'user.department'],
+    initialSort: { key: 'idle_seconds', dir: 'desc' },
+    pageSize: 10,
+  });
+
+  const rangeLabel = data
+    ? (data.start === data.end ? formatDate(data.start) : `${formatDate(data.start)} — ${formatDate(data.end)}`)
+    : '…';
+
+  const exportCsv = () => {
+    if (!rows.length) { toast.error('Nothing to export'); return; }
+    const head = ['Employee', 'Employee ID', 'Department', 'Present Days', 'Work Hours', 'Idle Time', 'Break Time', 'Effective Hours', 'Idle Events', 'Long Idle (>=30m)'];
+    const body = rows.map(r => [
+      `${r.user.first_name} ${r.user.last_name}`, r.user.employee_id, r.user.department || '',
+      r.present_days, r.work_hours, formatHMS(r.idle_seconds), formatHMS(r.break_seconds), r.effective_hours, r.idle_events, r.long_idle,
+    ]);
+    const csv = [head, ...body].map(line => line.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `idle-report-${period}-${data?.start}_${data?.end}.csv`; a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const summary = [
+    { label: 'Employees',        value: totals.employees ?? 0,             color: '#818CF8' },
+    { label: 'Total Work',       value: fmtHours(totals.work_hours),       color: '#34D399' },
+    { label: 'Total Idle',       value: formatHMS(totals.idle_seconds || 0),  color: '#F87171' },
+    { label: 'Total Break',      value: formatHMS(totals.break_seconds || 0), color: '#FBBF24' },
+    { label: 'Long Idle (≥30m)', value: totals.long_idle ?? 0,             color: '#F87171' },
+  ];
+
+  const seg = (active) => ({
+    padding: '7px 14px', fontSize: '12px', fontWeight: 700, borderRadius: '8px', cursor: 'pointer',
+    border: '1px solid ' + (active ? 'rgba(167,139,250,0.4)' : 'rgba(255,255,255,0.1)'),
+    background: active ? 'rgba(167,139,250,0.18)' : 'rgba(255,255,255,0.03)',
+    color: active ? '#A78BFA' : 'rgba(241,245,249,0.55)', transition: 'all 0.15s',
+  });
+
+  return (
+    <div style={glass}>
+      <div style={{ padding: '18px 22px', borderBottom: '1px solid rgba(255,255,255,0.06)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ width: '34px', height: '34px', borderRadius: '10px', background: 'linear-gradient(135deg,#A78BFA,#7C3AED)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 6px 16px rgba(167,139,250,0.3)' }}>
+            <BarChart3 size={17} color="white" />
+          </div>
+          <div>
+            <p style={{ fontSize: '14px', fontWeight: 700, color: '#F1F5F9', letterSpacing: '-0.2px' }}>Idle Report</p>
+            <p style={{ fontSize: '12px', color: 'rgba(241,245,249,0.35)', marginTop: '2px' }}>Idle, work &amp; break time aggregated by period and scope</p>
+          </div>
+        </div>
+        <button onClick={exportCsv} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#34D399', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', cursor: 'pointer', padding: '8px 14px', borderRadius: '9px' }}
+          onMouseEnter={e => e.currentTarget.style.background = 'rgba(52,211,153,0.18)'}
+          onMouseLeave={e => e.currentTarget.style.background = 'rgba(52,211,153,0.1)'}>
+          <Download size={13} /> Export CSV
+        </button>
+      </div>
+
+      {/* Controls */}
+      <div style={{ padding: '16px 22px', borderBottom: '1px solid rgba(255,255,255,0.05)', display: 'flex', alignItems: 'center', gap: '20px', flexWrap: 'wrap' }}>
+        {/* Period segmented control */}
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {PERIODS.map(p => (
+            <button key={p.key} onClick={() => setPeriod(p.key)} style={seg(period === p.key)}>{p.label}</button>
+          ))}
+        </div>
+        {/* Anchor navigation */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <button onClick={() => shiftAnchor(-1)} title="Previous" style={{ display: 'flex', padding: '7px', borderRadius: '8px', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(241,245,249,0.6)' }}><ChevronLeft size={15} /></button>
+          <span style={{ fontSize: '12px', fontWeight: 700, color: '#F1F5F9', minWidth: '170px', textAlign: 'center' }}>{rangeLabel}</span>
+          <button onClick={() => shiftAnchor(1)} title="Next" style={{ display: 'flex', padding: '7px', borderRadius: '8px', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(241,245,249,0.6)' }}><ChevronRight size={15} /></button>
+        </div>
+        {/* Scope */}
+        <div style={{ display: 'flex', gap: '6px' }}>
+          {SCOPES.map(s => (
+            <button key={s.key} onClick={() => { setScope(s.key); if (s.key !== 'department') setDept(''); if (s.key !== 'employee') setEmp(''); }} style={seg(scope === s.key)}>{s.label}</button>
+          ))}
+        </div>
+        {scope === 'department' && (
+          <select value={dept} onChange={e => setDept(e.target.value)} style={selectStyle}>
+            <option value="" style={{ background: '#0D1117' }}>All departments</option>
+            {departments.map(d => <option key={d} value={d} style={{ background: '#0D1117' }}>{d}</option>)}
+          </select>
+        )}
+        {scope === 'employee' && (
+          <select value={emp} onChange={e => setEmp(e.target.value)} style={selectStyle}>
+            <option value="" style={{ background: '#0D1117' }}>Select employee…</option>
+            {employees.map(u => <option key={u.id} value={u.id} style={{ background: '#0D1117' }}>{u.first_name} {u.last_name} ({u.employee_id})</option>)}
+          </select>
+        )}
+        {isFetching && <span style={{ fontSize: '11px', color: 'rgba(167,139,250,0.7)' }}>Loading…</span>}
+      </div>
+
+      {/* Summary chips */}
+      <div style={{ padding: '14px 22px', display: 'flex', gap: '10px', flexWrap: 'wrap', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+        {summary.map(s => (
+          <div key={s.label} style={{ flex: '1 1 130px', background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: '12px', padding: '12px 14px' }}>
+            <p style={{ fontSize: '20px', fontWeight: 800, color: s.color, letterSpacing: '-0.5px', fontVariantNumeric: 'tabular-nums' }}>{s.value}</p>
+            <p style={{ fontSize: '10px', fontWeight: 600, color: 'rgba(241,245,249,0.4)', textTransform: 'uppercase', letterSpacing: '0.6px', marginTop: '3px' }}>{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <TableToolbar search={tc.search} setSearch={tc.setSearch} total={tc.total} placeholder="Search name, ID or department…" />
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <SortTh label="Employee"        sortKey="user.first_name" sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Department"      sortKey="user.department" sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Present Days"    sortKey="present_days"    sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Work Hrs"        sortKey="work_hours"      sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Idle Time"       sortKey="idle_seconds"    sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Break Time"      sortKey="break_seconds"   sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Effective Hrs"   sortKey="effective_hours" sort={tc.sort} toggleSort={tc.toggleSort} />
+              <SortTh label="Long Idle"       sortKey="long_idle"       sort={tc.sort} toggleSort={tc.toggleSort} />
+            </tr>
+          </thead>
+          <tbody>
+            {!tc.total ? (
+              <tr><td colSpan={8} style={{ padding: '48px', textAlign: 'center', fontSize: '13px', color: 'rgba(241,245,249,0.2)' }}>No idle / attendance data for this period</td></tr>
+            ) : (
+              tc.view.map((row, i) => {
+                const isHigh = row.idle_seconds > HIGH_IDLE;
+                return (
+                  <tr key={row.user?.id || i} style={{ transition: 'background 0.12s' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.025)'}
+                    onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <td style={S.td}>
+                      <p style={{ fontWeight: 600, color: '#F1F5F9', fontSize: '13px' }}>{row.user?.first_name} {row.user?.last_name}</p>
+                      <p style={{ fontSize: '11px', color: 'rgba(241,245,249,0.3)', marginTop: '2px' }}>{row.user?.employee_id}</p>
+                    </td>
+                    <td style={S.td}>{row.user?.department || '—'}</td>
+                    <td style={{ ...S.td, fontWeight: 600 }}>{row.present_days}</td>
+                    <td style={{ ...S.td, fontWeight: 600, color: '#34D399', fontVariantNumeric: 'tabular-nums' }}>{fmtHours(row.work_hours)}</td>
+                    <td style={{ ...S.td, fontWeight: 700, color: isHigh ? '#F87171' : 'rgba(241,245,249,0.75)', fontVariantNumeric: 'tabular-nums' }}>{formatHMS(row.idle_seconds)}</td>
+                    <td style={{ ...S.td, fontWeight: 600, color: '#FBBF24', fontVariantNumeric: 'tabular-nums' }}>{formatHMS(row.break_seconds)}</td>
+                    <td style={{ ...S.td, fontWeight: 700, color: '#818CF8', fontVariantNumeric: 'tabular-nums' }}>{fmtHours(row.effective_hours)}</td>
+                    <td style={S.td}>
+                      {row.long_idle > 0
+                        ? <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '3px 9px', borderRadius: '7px', fontSize: '11px', fontWeight: 700, background: 'rgba(248,113,113,0.15)', color: '#F87171', border: '1px solid rgba(248,113,113,0.3)' }}><AlertTriangle size={10} /> {row.long_idle}</span>
+                        : <span style={{ color: 'rgba(241,245,249,0.3)' }}>0</span>}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+      </div>
+      <Pagination page={tc.page} pageCount={tc.pageCount} setPage={tc.setPage} total={tc.total} pageSize={tc.pageSize} />
     </div>
   );
 }
@@ -391,6 +606,9 @@ export default function IdleMonitorPage() {
         </div>
         <Pagination page={stc.page} pageCount={stc.pageCount} setPage={stc.setPage} total={stc.total} pageSize={stc.pageSize} />
       </div>
+
+      {/* Historical report — daily / weekly / monthly / yearly, global / dept / employee */}
+      <IdleHistoryReport />
 
       {timeline && <IdleTimelineModal userId={timeline.userId} date={timeline.date} name={timeline.name} onClose={() => setTimeline(null)} />}
     </div>
