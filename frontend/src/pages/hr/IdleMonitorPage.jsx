@@ -62,6 +62,8 @@ function IdleTimelineModal({ userId, date, name, onClose }) {
                 {[
                   { icon:<Clock size={11}/>, label:`Clocked in: ${formatTime(data.attendance.login_time)}`, bg:'rgba(129,140,248,0.15)', color:'#818CF8', border:'rgba(129,140,248,0.3)' },
                   ...(data.attendance.logout_time ? [{ icon:<Clock size={11}/>, label:`Clocked out: ${formatTime(data.attendance.logout_time)}`, bg:'rgba(255,255,255,0.06)', color:'rgba(241,245,249,0.6)', border:'rgba(255,255,255,0.12)' }] : []),
+                  ...(data.attendance.login_time_2 ? [{ icon:<Clock size={11}/>, label:`2nd clock-in: ${formatTime(data.attendance.login_time_2)}`, bg:'rgba(129,140,248,0.15)', color:'#818CF8', border:'rgba(129,140,248,0.3)' }] : []),
+                  ...(data.attendance.logout_time_2 ? [{ icon:<Clock size={11}/>, label:`2nd clock-out: ${formatTime(data.attendance.logout_time_2)}`, bg:'rgba(255,255,255,0.06)', color:'rgba(241,245,249,0.6)', border:'rgba(255,255,255,0.12)' }] : []),
                   { icon:null, label:`Work: ${totalWork}m`, bg:'rgba(52,211,153,0.15)', color:'#34D399', border:'rgba(52,211,153,0.3)' },
                   { icon:null, label:`Idle Time: ${formatHMS(totalIdleSecs)}`, bg:'rgba(248,113,113,0.15)', color:'#F87171', border:'rgba(248,113,113,0.3)' },
                   { icon:null, label:`Break Time: ${formatHMS(totalBreakSecs)}`, bg:'rgba(251,191,36,0.15)', color:'#FBBF24', border:'rgba(251,191,36,0.3)' },

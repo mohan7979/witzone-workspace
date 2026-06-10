@@ -68,8 +68,8 @@ function Tooltip({ entry, dateStr, x, y, visible }) {
         <span style={{ color:'rgba(241,245,249,0.35)', fontSize:'11px', marginLeft:'auto' }}>{displayDate}</span>
       </div>
       {entry.detail && <p style={{ color:'rgba(241,245,249,0.5)', fontSize:'12px', lineHeight:1.5, marginBottom:0 }}>{entry.detail}</p>}
-      {(entry.login_time || entry.logout_time) && (
-        <div style={{ marginTop:'10px', paddingTop:'10px', borderTop:'1px solid rgba(255,255,255,0.07)', display:'flex', gap:'16px' }}>
+      {(entry.login_time || entry.logout_time || entry.login_time_2 || entry.logout_time_2) && (
+        <div style={{ marginTop:'10px', paddingTop:'10px', borderTop:'1px solid rgba(255,255,255,0.07)', display:'flex', flexWrap:'wrap', gap:'16px', rowGap:'10px' }}>
           {entry.login_time && (
             <div>
               <p style={{ color:'rgba(241,245,249,0.3)', fontSize:'10px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>Clock In</p>
@@ -80,6 +80,18 @@ function Tooltip({ entry, dateStr, x, y, visible }) {
             <div>
               <p style={{ color:'rgba(241,245,249,0.3)', fontSize:'10px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>Clock Out</p>
               <p style={{ color:'#F87171', fontSize:'12px', fontWeight:700 }}>{fmt12(entry.logout_time)}</p>
+            </div>
+          )}
+          {entry.login_time_2 && (
+            <div>
+              <p style={{ color:'rgba(241,245,249,0.3)', fontSize:'10px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>2nd Clock In</p>
+              <p style={{ color:'#34D399', fontSize:'12px', fontWeight:700 }}>{fmt12(entry.login_time_2)}</p>
+            </div>
+          )}
+          {entry.logout_time_2 && (
+            <div>
+              <p style={{ color:'rgba(241,245,249,0.3)', fontSize:'10px', fontWeight:600, textTransform:'uppercase', letterSpacing:'0.5px' }}>2nd Clock Out</p>
+              <p style={{ color:'#F87171', fontSize:'12px', fontWeight:700 }}>{fmt12(entry.logout_time_2)}</p>
             </div>
           )}
         </div>

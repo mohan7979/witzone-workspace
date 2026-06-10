@@ -285,11 +285,11 @@ export default function HRDashboard() {
         <div style={{ overflowX:'auto' }}>
           <table style={{ width:'100%', borderCollapse:'collapse' }}>
             <thead>
-              <tr>{['Employee','Department','Clock In','Clock Out','Status'].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
+              <tr>{['Employee','Department','Clock In','Clock Out','2nd In','2nd Out','Status'].map(h => <th key={h} style={S.th}>{h}</th>)}</tr>
             </thead>
             <tbody>
               {!teamAtt?.data?.length ? (
-                <tr><td colSpan={5} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No attendance records yet today</td></tr>
+                <tr><td colSpan={7} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No attendance records yet today</td></tr>
               ) : teamAtt.data.map((row) => (
                 <tr key={row.id} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={e => e.currentTarget.style.background='transparent'} style={{ transition:'background 0.12s' }}>
                   <td style={S.td}>
@@ -306,6 +306,8 @@ export default function HRDashboard() {
                   <td style={S.td}><span style={{ background:'rgba(255,255,255,0.05)', border:'1px solid rgba(255,255,255,0.08)', borderRadius:'6px', padding:'3px 8px', fontSize:'12px' }}>{row.user?.department ?? '—'}</span></td>
                   <td style={{ ...S.td, fontWeight:600, color:'#34D399' }}>{formatTime(row.login_time)}</td>
                   <td style={{ ...S.td, color:'rgba(241,245,249,0.4)' }}>{formatTime(row.logout_time)}</td>
+                  <td style={{ ...S.td, fontWeight:600, color: row.login_time_2 ? '#34D399' : 'rgba(241,245,249,0.4)' }}>{formatTime(row.login_time_2)}</td>
+                  <td style={{ ...S.td, color:'rgba(241,245,249,0.4)' }}>{formatTime(row.logout_time_2)}</td>
                   <td style={S.td}><Badge status={row.status} /></td>
                 </tr>
               ))}

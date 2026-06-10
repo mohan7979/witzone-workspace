@@ -42,7 +42,7 @@ export default function AttendancePage() {
             <thead>
               <tr>
                 <SortTh label="Date" sortKey="date" sort={tc.sort} toggleSort={tc.toggleSort} />
-                {['Clock In','Clock Out','Total Hours','Idle Time','Break Time','Effective Hrs'].map((h) => (
+                {['Clock In','Clock Out','2nd Clock In','2nd Clock Out','Total Hours','Idle Time','Break Time','Effective Hrs'].map((h) => (
                   <th key={h} style={S.th}>{h}</th>
                 ))}
                 <SortTh label="Status" sortKey="status" sort={tc.sort} toggleSort={tc.toggleSort} />
@@ -50,10 +50,10 @@ export default function AttendancePage() {
             </thead>
             <tbody>
               {isLoading && (
-                <tr><td colSpan={8} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading records…</td></tr>
+                <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading records…</td></tr>
               )}
               {!isLoading && !tc.total && (
-                <tr><td colSpan={8} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No attendance records found</td></tr>
+                <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No attendance records found</td></tr>
               )}
               {tc.view.map((row) => {
                 const idleSec = row.idle_seconds || 0;
@@ -68,6 +68,8 @@ export default function AttendancePage() {
                     <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>{formatDate(row.date)}</td>
                     <td style={{ ...S.td, fontWeight:600, color:'#34D399' }}>{formatTime(row.login_time)}</td>
                     <td style={{ ...S.td, color:'rgba(241,245,249,0.4)' }}>{formatTime(row.logout_time)}</td>
+                    <td style={{ ...S.td, fontWeight:600, color: row.login_time_2 ? '#34D399' : 'rgba(241,245,249,0.4)' }}>{formatTime(row.login_time_2)}</td>
+                    <td style={{ ...S.td, color:'rgba(241,245,249,0.4)' }}>{formatTime(row.logout_time_2)}</td>
                     <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>{formatDuration(row.total_hours)}</td>
                     <td style={{ ...S.td, color: idleSec > 1800 ? '#F87171' : 'rgba(241,245,249,0.4)', fontWeight: idleSec > 1800 ? 700 : 400, fontVariantNumeric:'tabular-nums' }}>
                       {hasClocked ? formatHMS(idleSec) : '—'}

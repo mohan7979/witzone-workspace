@@ -478,7 +478,11 @@ exports.calendarView = asyncHandler(async (req, res) => {
         login_time_2: att.login_time_2, logout_time_2: att.logout_time_2,
       };
     } else if (att && att.status === 'half_day') {
-      entry = { type: 'half_day', label: 'Half Day', detail: hoursDetail(att) };
+      entry = {
+        type: 'half_day', label: 'Half Day', detail: hoursDetail(att),
+        login_time: att.login_time, logout_time: att.logout_time,
+        login_time_2: att.login_time_2, logout_time_2: att.logout_time_2,
+      };
     } else if ((att && att.status === 'on_leave') || lv) {
       const lvLabel = lv ? `${capitalize(lv.type.replace(/_/g, ' '))} Leave` : 'On Leave';
       const pending = lv && lv.status === 'pending';
