@@ -66,8 +66,9 @@ async function resolveBreak(rec, now) {
   await rec.update({ on_break: false, break_start: null, total_break_seconds: newTotal });
 
   // Close the open break-log row (Break Out) so HR sees an exact in/out pair.
+  // Not date-constrained — a break opened before midnight closes after it.
   const openBreak = await BreakLog.findOne({
-    where: { user_id: rec.user_id, date: rec.date, break_end: null },
+    where: { user_id: rec.user_id, break_end: null },
     order: [['break_start', 'DESC']],
   });
   if (openBreak) {
@@ -82,19 +83,25 @@ async function resolveBreak(rec, now) {
  * `logoutField` is either 'logout_time' (session 1) or 'logout_time_2' (session 2).
  */
 async function finalizeClockOut(rec, now, logoutField, logoutIp) {
-  const today = todayIST();
+  // A shift may span past midnight (night shift), so aggregate idle across the
+  // whole date span of the shift — clock-in date → today — not a single day.
+  const fromDate  = rec.date;
+  const toDate    = todayIST();
+  const dateWhere = fromDate === toDate
+    ? { date: fromDate }
+    : { date: { [Op.between]: [fromDate, toDate] } };
 
   // 1. Auto-end any open break first
   await resolveBreak(rec, now);
 
-  // 2. Close any open idle sessions
+  // 2. Close any open idle sessions belonging to this shift
   await IdleLog.update(
     { idle_end: now },
-    { where: { user_id: rec.user_id, date: today, idle_end: null } }
+    { where: { user_id: rec.user_id, ...dateWhere, idle_end: null } }
   );
 
-  // 3. Sum idle seconds for the day
-  const idleLogs   = await IdleLog.findAll({ where: { user_id: rec.user_id, date: today } });
+  // 3. Sum idle seconds across the shift
+  const idleLogs   = await IdleLog.findAll({ where: { user_id: rec.user_id, ...dateWhere } });
   const idleSecs   = idleLogs.reduce((s, l) => s + (l.idle_seconds || 0), 0);
 
   // 4. Total hours across all completed sessions
@@ -122,6 +129,32 @@ async function finalizeClockOut(rec, now, logoutField, logoutIp) {
   return rec;
 }
 
+/**
+ * Resolve the attendance record the employee is currently operating under.
+ *
+ * A night shift that crosses midnight keeps the SAME record — dated at clock-in
+ * (its "business date") — so clock-out / break / status must locate the still-open
+ * session even after `todayIST()` has rolled over to the next calendar day.
+ * Returns the open-session record (looking back a couple of days to cover long
+ * overnight shifts); if none is open, falls back to today's record (or null).
+ */
+async function findCurrentRecord(userId) {
+  const lookbackDate = nowIST().subtract(2, 'days').format('YYYY-MM-DD');
+  const open = await Attendance.findOne({
+    where: {
+      user_id: userId,
+      date: { [Op.gte]: lookbackDate },
+      [Op.or]: [
+        { login_time:   { [Op.ne]: null }, logout_time:   null },   // session 1 open
+        { login_time_2: { [Op.ne]: null }, logout_time_2: null },   // session 2 open
+      ],
+    },
+    order: [['date', 'DESC']],
+  });
+  if (open) return open;
+  return Attendance.findOne({ where: { user_id: userId, date: todayIST() } });
+}
+
 /* ─────────────────────────────────────────────────────────────────────────────
  * CLOCK IN
  * Two sessions per day max. Session 2 can start after Session 1 is done.
@@ -130,7 +163,9 @@ exports.clockIn = asyncHandler(async (req, res) => {
   const today = todayIST();
   const now   = nowIST().toDate();
 
-  let rec = await Attendance.findOne({ where: { user_id: req.user.id, date: today } });
+  // Use the in-progress shift if one is open (covers a 2nd clock-in after a
+  // night-shift session that crossed midnight); else today's record.
+  let rec = await findCurrentRecord(req.user.id);
 
   /* ── Session 1 ── */
   if (!rec || !rec.login_time) {
@@ -182,10 +217,10 @@ exports.clockIn = asyncHandler(async (req, res) => {
  * CLOCK OUT
  * ───────────────────────────────────────────────────────────────────────────── */
 exports.clockOut = asyncHandler(async (req, res) => {
-  const today = todayIST();
-  const now   = nowIST().toDate();
+  const now = nowIST().toDate();
 
-  const rec = await Attendance.findOne({ where: { user_id: req.user.id, date: today } });
+  // Find the open session — even if it was started yesterday (night shift).
+  const rec = await findCurrentRecord(req.user.id);
 
   if (!rec || !rec.login_time) {
     return res.status(400).json({ message: 'No clock-in found for today.' });
@@ -219,10 +254,9 @@ exports.clockOut = asyncHandler(async (req, res) => {
  * Only allowed when actively clocked in (session open, not already on break).
  * ───────────────────────────────────────────────────────────────────────────── */
 exports.startBreak = asyncHandler(async (req, res) => {
-  const today = todayIST();
-  const now   = nowIST().toDate();
+  const now = nowIST().toDate();
 
-  const rec = await Attendance.findOne({ where: { user_id: req.user.id, date: today } });
+  const rec = await findCurrentRecord(req.user.id);
 
   if (!rec || !activeSession(rec)) {
     return res.status(400).json({ message: 'You must be clocked in to start a break.' });
@@ -234,12 +268,13 @@ exports.startBreak = asyncHandler(async (req, res) => {
   await rec.update({ on_break: true, break_start: now });
 
   // Open a break-log row (Break In) — closed with break_end on endBreak/clock-out.
-  await BreakLog.create({ user_id: req.user.id, date: today, break_start: now });
+  // Logged under the shift's business date so it stays grouped with the shift.
+  await BreakLog.create({ user_id: req.user.id, date: rec.date, break_start: now });
 
   // Close any running idle session — you can't be idle AND on break
   await IdleLog.update(
     { idle_end: now },
-    { where: { user_id: req.user.id, date: today, idle_end: null } }
+    { where: { user_id: req.user.id, idle_end: null } }
   );
 
   await rec.reload();
@@ -250,10 +285,9 @@ exports.startBreak = asyncHandler(async (req, res) => {
  * END BREAK
  * ───────────────────────────────────────────────────────────────────────────── */
 exports.endBreak = asyncHandler(async (req, res) => {
-  const today = todayIST();
-  const now   = nowIST().toDate();
+  const now = nowIST().toDate();
 
-  const rec = await Attendance.findOne({ where: { user_id: req.user.id, date: today } });
+  const rec = await findCurrentRecord(req.user.id);
 
   if (!rec || !rec.on_break) {
     return res.status(400).json({ message: 'You are not on a break.' });
@@ -276,8 +310,8 @@ exports.endBreak = asyncHandler(async (req, res) => {
  * Returns full attendance record + computed state, session info, and flags.
  * ───────────────────────────────────────────────────────────────────────────── */
 exports.todayStatus = asyncHandler(async (req, res) => {
-  const today = todayIST();
-  const rec   = await Attendance.findOne({ where: { user_id: req.user.id, date: today } });
+  // Reflect the in-progress shift even after midnight (night shift).
+  const rec = await findCurrentRecord(req.user.id);
 
   const state  = deriveState(rec);
   const sessNo = activeSession(rec);
