@@ -26,9 +26,29 @@ app.set('trust proxy', 1);
 const { authenticate } = require('./middleware/auth');
 app.use('/uploads', authenticate, express.static(require('path').join(__dirname, '../uploads')));
 
-// Rate limiting
-app.use('/api/auth/login', rateLimit({ windowMs: 15 * 60 * 1000, max: 10, message: { message: 'Too many login attempts' } }));
-app.use('/api/', rateLimit({ windowMs: 15 * 60 * 1000, max: 300 }));
+// Rate limiting. A whole BPO floor shares one public IP (office NAT), and with
+// `trust proxy` the limiter sees that single IP — so a per-IP limit throttles
+// everyone at once (this caused 429s at shift start). Login is therefore limited
+// PER ACCOUNT (ip + email): brute force on one user is still capped, but coworkers
+// on the same office IP don't block each other. The high-frequency desktop-agent
+// endpoints (idle heartbeat, live-screen poll/frame) are exempt from the general
+// limiter so a few agents polling don't exhaust the shared-IP budget.
+app.use('/api/auth/login', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  validate: false,   // we intentionally use a custom ip+email key (IPv4 office IPs)
+  keyGenerator: (req) => `${req.ip}:${(req.body && req.body.email ? String(req.body.email).toLowerCase() : '')}`,
+  message: { message: 'Too many login attempts for this account. Please wait a few minutes and try again.' },
+}));
+app.use('/api/', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 2000,
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: (req) => req.originalUrl.startsWith('/api/idle/'),
+}));
 
 // Routes
 app.use('/api/auth', require('./routes/auth'));
