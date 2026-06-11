@@ -1,4 +1,5 @@
 import { Outlet, Navigate, useNavigate } from 'react-router-dom';
+import Avatar from '@/components/ui/Avatar';
 import Sidebar from './Sidebar';
 import useAuthStore from '@/store/authStore';
 import { Bell, Search } from 'lucide-react';
@@ -144,16 +145,7 @@ export default function AppLayout() {
               onMouseEnter={e => { e.currentTarget.style.background = 'rgba(129,140,248,0.1)'; e.currentTarget.style.borderColor = 'rgba(129,140,248,0.25)'; }}
               onMouseLeave={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.05)'; e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)'; }}
             >
-              <div style={{
-                width: '28px', height: '28px', borderRadius: '50%',
-                background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: 'white', fontSize: '10px', fontWeight: 800,
-                boxShadow: '0 0 0 2px rgba(99,102,241,0.35)',
-                flexShrink: 0,
-              }}>
-                {user?.first_name?.[0]}{user?.last_name?.[0]}
-              </div>
+              <Avatar user={user} size={28} fontSize="10px" style={{ boxShadow: '0 0 0 2px rgba(99,102,241,0.35)' }} />
               <div>
                 <p style={{ fontSize: '12px', fontWeight: 600, color: '#F1F5F9', lineHeight: 1.3, whiteSpace: 'nowrap' }}>
                   {user?.first_name} {user?.last_name}

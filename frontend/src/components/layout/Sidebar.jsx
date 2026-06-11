@@ -1,4 +1,5 @@
 import { NavLink, useNavigate } from 'react-router-dom';
+import Avatar from '@/components/ui/Avatar';
 import { useQuery } from '@tanstack/react-query';
 import useAuthStore from '@/store/authStore';
 import { announcementApi } from '@/api';
@@ -196,15 +197,7 @@ export default function Sidebar() {
           marginBottom: '6px',
         }}>
           <div style={{ position: 'relative', flexShrink: 0 }}>
-            <div style={{
-              width: '36px', height: '36px', borderRadius: '50%',
-              background: 'linear-gradient(135deg, #6366F1, #8B5CF6)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              color: 'white', fontSize: '11px', fontWeight: 800,
-              boxShadow: '0 0 0 2px rgba(99,102,241,0.35), 0 4px 12px rgba(99,102,241,0.3)',
-            }}>
-              {user?.first_name?.[0]}{user?.last_name?.[0]}
-            </div>
+            <Avatar user={user} size={36} fontSize="11px" style={{ boxShadow: '0 0 0 2px rgba(99,102,241,0.35), 0 4px 12px rgba(99,102,241,0.3)' }} />
             <div style={{
               position: 'absolute', bottom: 0, right: 0,
               width: '9px', height: '9px', borderRadius: '50%',

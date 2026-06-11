@@ -314,7 +314,7 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     include: [
       {
         model: User, as: 'user', where: userWhere,
-        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'role', 'department', 'work_mode',
+        attributes: ['id', 'employee_id', 'first_name', 'last_name', 'role', 'department', 'work_mode', 'photo_thumb',
                      'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
                      'marriage_leave_balance', 'maternity_leave_balance', 'long_leave_balance'],
       },

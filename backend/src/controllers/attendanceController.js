@@ -369,7 +369,7 @@ exports.teamAttendance = asyncHandler(async (req, res) => {
 
   const userInclude = {
     model: User, as: 'user', where: userWhere,
-    attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
+    attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation', 'photo_thumb'],
   };
 
   // On the live (today) view, an overnight shift that began yesterday and is
@@ -407,7 +407,7 @@ exports.teamAttendance = asyncHandler(async (req, res) => {
   const [employees, records, overnight] = await Promise.all([
     User.findAll({
       where: userWhere,
-      attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation'],
+      attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'designation', 'photo_thumb'],
       order: [['first_name', 'ASC']],
     }),
     Attendance.findAll({ where: { date: today }, include: [userInclude] }),

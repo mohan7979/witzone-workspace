@@ -351,7 +351,7 @@ exports.leaveBalances = asyncHandler(async (req, res) => {
   const users = await User.findAll({
     where,
     attributes: [
-      'id', 'employee_id', 'first_name', 'last_name', 'department', 'designation', 'work_mode',
+      'id', 'employee_id', 'first_name', 'last_name', 'department', 'designation', 'work_mode', 'photo_thumb',
       'casual_leave_balance', 'sick_leave_balance', 'comp_off_balance',
       'marriage_leave_balance', 'maternity_leave_balance',
     ],

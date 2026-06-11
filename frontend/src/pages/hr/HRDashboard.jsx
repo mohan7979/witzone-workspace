@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import Avatar from '@/components/ui/Avatar';
 import { useNavigate } from 'react-router-dom';
 import { Users, UserCheck, UserX, CalendarClock, ArrowUpRight, TrendingUp, Timer, PartyPopper, CalendarRange } from 'lucide-react';
 import { reportApi, attendanceApi, leaveApi, masterApi } from '@/api';
@@ -45,9 +46,7 @@ function RequestList({ title, accent, requests, emptyText }) {
             onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.03)'}
             onMouseLeave={e => e.currentTarget.style.background='transparent'}
           >
-            <div style={{ width:'30px', height:'30px', borderRadius:'50%', flexShrink:0, background:'linear-gradient(135deg,#F472B6,#EC4899)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'10px', fontWeight:700, boxShadow:'0 0 12px rgba(244,114,182,0.3)', marginTop:'1px' }}>
-              {leave.user?.first_name?.[0]}{leave.user?.last_name?.[0]}
-            </div>
+            <Avatar user={leave.user} size={30} gradient="linear-gradient(135deg,#F472B6,#EC4899)" glow="rgba(244,114,182,0.3)" fontSize="10px" style={{ marginTop:'1px' }} />
             <div style={{ minWidth:0, flex:1 }}>
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', gap:'8px' }}>
                 <p style={{ fontSize:'12px', fontWeight:600, color:'#F1F5F9', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>{leave.user?.first_name} {leave.user?.last_name}</p>
@@ -294,9 +293,7 @@ export default function HRDashboard() {
                 <tr key={row.id} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={e => e.currentTarget.style.background='transparent'} style={{ transition:'background 0.12s' }}>
                   <td style={S.td}>
                     <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                      <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#6366F1,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, flexShrink:0, boxShadow:'0 0 10px rgba(99,102,241,0.3)' }}>
-                        {row.user?.first_name?.[0]}{row.user?.last_name?.[0]}
-                      </div>
+                      <Avatar user={row.user} size={32} glow="rgba(99,102,241,0.3)" fontSize="11px" />
                       <div>
                         <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{row.user?.first_name} {row.user?.last_name}</p>
                         <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)' }}>{row.user?.employee_id}</p>

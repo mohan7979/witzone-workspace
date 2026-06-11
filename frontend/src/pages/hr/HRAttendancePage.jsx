@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Avatar from '@/components/ui/Avatar';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { Calendar } from 'lucide-react';
@@ -170,9 +171,7 @@ export default function HRAttendancePage() {
                   >
                     <td style={S.td}>
                       <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                        <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#6366F1,#8B5CF6)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, flexShrink:0, boxShadow:'0 0 10px rgba(99,102,241,0.3)' }}>
-                          {row.user?.first_name?.[0]}{row.user?.last_name?.[0]}
-                        </div>
+                        <Avatar user={row.user} size={32} glow="rgba(99,102,241,0.3)" fontSize="11px" />
                         <div>
                           <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{row.user?.first_name} {row.user?.last_name}</p>
                           <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)' }}>{row.user?.employee_id}</p>

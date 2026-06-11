@@ -300,7 +300,7 @@ exports.liveIdleStatus = asyncHandler(async (req, res) => {
     order: [['date', 'DESC']],
     include: [{
       model: User, as: 'user', where: userWhere,
-      attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'last_heartbeat', 'last_idle_seconds'],
+      attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department', 'last_heartbeat', 'last_idle_seconds', 'photo_thumb'],
     }],
   });
 

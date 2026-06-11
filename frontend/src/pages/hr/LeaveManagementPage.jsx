@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import Avatar from '@/components/ui/Avatar';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle, XCircle, X, GitBranch, Paperclip } from 'lucide-react';
@@ -333,9 +334,7 @@ export default function LeaveManagementPage() {
 
                   <td style={S.td}>
                     <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-                      <div style={{ width:'32px', height:'32px', borderRadius:'50%', background:'linear-gradient(135deg,#F472B6,#EC4899)', display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, flexShrink:0 }}>
-                        {leave.user?.first_name?.[0]}{leave.user?.last_name?.[0]}
-                      </div>
+                      <Avatar user={leave.user} size={32} gradient="linear-gradient(135deg,#F472B6,#EC4899)" fontSize="11px" />
                       <div>
                         <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{leave.user?.first_name} {leave.user?.last_name}</p>
                         <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)', marginTop:'1px' }}>{leave.user?.department}</p>

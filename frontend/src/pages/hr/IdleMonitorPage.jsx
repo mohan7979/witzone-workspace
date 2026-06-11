@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import Avatar from '@/components/ui/Avatar';
 import { useRef, useEffect, useState } from 'react';
 import { idleApi, reportApi, userApi } from '@/api';
 import { formatHMS, formatTime, formatDate } from '@/lib/utils';
@@ -196,9 +197,7 @@ function UserRow({ user, type, onViewScreen }) {
       onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'}
       onMouseLeave={e => e.currentTarget.style.background='transparent'}>
       <div style={{ display:'flex', alignItems:'center', gap:'10px' }}>
-        <div style={{ width:'32px', height:'32px', borderRadius:'50%', flexShrink:0, background:gradients[type], display:'flex', alignItems:'center', justifyContent:'center', color:'white', fontSize:'11px', fontWeight:700, boxShadow:`0 0 12px rgba(${glowRgb},0.3)` }}>
-          {user.first_name?.[0]}{user.last_name?.[0]}
-        </div>
+        <Avatar user={user} size={32} gradient={gradients[type]} glow={`rgba(${glowRgb},0.3)`} fontSize="11px" />
         <div>
           <p style={{ fontSize:'13px', fontWeight:600, color:'#F1F5F9', display:'flex', alignItems:'center', gap:'6px' }}>
             {user.first_name} {user.last_name}

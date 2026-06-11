@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Avatar from '@/components/ui/Avatar';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { userApi, authApi, leaveApi } from '@/api';
 import useAuthStore from '@/store/authStore';
@@ -254,7 +255,6 @@ function HRView() {
                 {rows.length === 0 ? (
                   <tr><td colSpan={isHRRole ? 8 : 7} style={{ ...tdStyle, textAlign:'center', color:'#475569', padding:40 }}>No employees found</td></tr>
                 ) : rows.map(u => {
-                  const initials = `${u.first_name?.[0]||''}${u.last_name?.[0]||''}`.toUpperCase();
                   const isWFH = u.work_mode === 'wfh';
                   return (
                     <tr key={u.id} style={{ transition:'background 0.15s' }}
@@ -262,7 +262,7 @@ function HRView() {
                       onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                       <td style={tdStyle}>
                         <div style={{ display:'flex', alignItems:'center', gap:10 }}>
-                          <div style={{ width:32, height:32, borderRadius:'50%', background:'linear-gradient(135deg,#818CF8,#6366F1)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:11, fontWeight:700, color:'#fff', flexShrink:0 }}>{initials}</div>
+                          <Avatar user={u} size={32} gradient="linear-gradient(135deg,#818CF8,#6366F1)" fontSize={11} />
                           <div>
                             <div style={{ fontWeight:600, color:'#E2E8F0', fontSize:13 }}>{u.first_name} {u.last_name}</div>
                             <div style={{ color:'#475569', fontSize:11 }}>{u.employee_id}</div>
