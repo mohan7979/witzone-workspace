@@ -293,11 +293,14 @@ function IdleHistoryReport() {
   });
 
   const shiftAnchor = (dir) => {
-    const d = new Date(anchor + 'T00:00:00');
-    if (period === 'daily')   d.setDate(d.getDate() + dir);
-    if (period === 'weekly')  d.setDate(d.getDate() + dir * 7);
-    if (period === 'monthly') d.setMonth(d.getMonth() + dir);
-    if (period === 'yearly')  d.setFullYear(d.getFullYear() + dir);
+    // Do the math entirely in UTC so it's timezone-independent. (Parsing as local
+    // and serialising with toISOString shifts the date in zones ahead of UTC like
+    // IST, which made "next" appear to do nothing.)
+    const d = new Date(anchor + 'T00:00:00Z');
+    if (period === 'daily')   d.setUTCDate(d.getUTCDate() + dir);
+    if (period === 'weekly')  d.setUTCDate(d.getUTCDate() + dir * 7);
+    if (period === 'monthly') d.setUTCMonth(d.getUTCMonth() + dir);
+    if (period === 'yearly')  d.setUTCFullYear(d.getUTCFullYear() + dir);
     setAnchor(d.toISOString().split('T')[0]);
   };
 
