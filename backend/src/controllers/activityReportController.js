@@ -88,12 +88,14 @@ const COLUMNS = [
   { key: 'breaks',      header: 'Break In / Out',    w: 34, breaks: true },
   { key: 'total_break_seconds', header: 'Total Break', w: 13, hms: true },
   { key: 'idle_seconds',        header: 'Idle Time',   w: 13, hms: true },
+  { key: 'effective_hours',     header: 'Effective Hours', w: 15, hours: true },
   { key: 'status',      header: 'Status',            w: 11 },
 ];
 
 function cellValue(row, col) {
   if (col.time)   return fmtClock(row[col.key]);
   if (col.hms)    return fmtHMS(row[col.key]);
+  if (col.hours)  return row[col.key] != null ? fmtHMS(Number(row[col.key]) * 3600) : '—';  // hours → HH:MM:SS
   if (col.breaks) return breaksCell(row.breaks);
   if (col.key === 'date') return moment.tz(row.date, TZ).format('DD-MMM-YYYY');
   return row[col.key] != null ? String(row[col.key]) : '—';
@@ -150,6 +152,7 @@ function sendPdf(res, rows, start, end) {
     { key: 'clock_out_2', header: '2nd Out', w: 56, time: true },
     { key: 'idle_seconds', header: 'Idle', w: 58, hms: true },
     { key: 'total_break_seconds', header: 'Break', w: 58, hms: true },
+    { key: 'effective_hours', header: 'Effective', w: 60, hours: true },
     { key: 'status', header: 'Status', w: 56 },
   ];
   const startX = doc.x;
@@ -171,7 +174,11 @@ function sendPdf(res, rows, start, end) {
   for (const r of rows) {
     if (y > doc.page.height - 40) { doc.addPage(); y = doc.y; drawRow(pcols.map((c) => c.header), { header: true }); }
     const cells = pcols.map((c) =>
-      c.fmt ? c.fmt(r) : c.time ? fmtClock(r[c.key]) : c.hms ? fmtHMS(r[c.key]) : (r[c.key] != null ? String(r[c.key]) : '—')
+      c.fmt ? c.fmt(r)
+        : c.time  ? fmtClock(r[c.key])
+        : c.hms   ? fmtHMS(r[c.key])
+        : c.hours ? (r[c.key] != null ? fmtHMS(Number(r[c.key]) * 3600) : '—')
+        : (r[c.key] != null ? String(r[c.key]) : '—')
     );
     drawRow(cells);
   }

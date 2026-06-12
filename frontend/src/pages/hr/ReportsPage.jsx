@@ -278,12 +278,12 @@ export default function ReportsPage() {
                 <thead><tr>
                   <SortTh label="Date"     sortKey="date"   sort={actTc.sort} toggleSort={actTc.toggleSort} />
                   <SortTh label="Employee" sortKey="name"   sort={actTc.sort} toggleSort={actTc.toggleSort} />
-                  {['Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time'].map(h => <th key={h} style={S.th}>{h}</th>)}
+                  {['Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time','Effective Hours'].map(h => <th key={h} style={S.th}>{h}</th>)}
                   <SortTh label="Status"   sortKey="status" sort={actTc.sort} toggleSort={actTc.toggleSort} />
                 </tr></thead>
                 <tbody>
-                  {activity.isLoading && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
-                  {!activity.isLoading && !actTc.total && <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
+                  {activity.isLoading && <tr><td colSpan={11} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
+                  {!activity.isLoading && !actTc.total && <tr><td colSpan={11} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
                   {actTc.view.map((row, i) => (
                     <tr key={i} style={{ transition:'background 0.12s' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                       <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap' }}>{formatDate(row.date)}</td>
@@ -298,6 +298,7 @@ export default function ReportsPage() {
                       <td style={S.td}><BreaksCell breaks={row.breaks} /></td>
                       <td style={{ ...S.td, fontWeight:700, color:'#FBBF24', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{formatHMS(row.total_break_seconds)}</td>
                       <td style={{ ...S.td, fontWeight:700, color: (row.idle_seconds||0) > 1800 ? '#F87171' : 'rgba(241,245,249,0.5)', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{formatHMS(row.idle_seconds)}</td>
+                      <td style={{ ...S.td, fontWeight:700, color:'#818CF8', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{row.effective_hours != null ? formatHMS(Math.round(row.effective_hours * 3600)) : '—'}</td>
                       <td style={S.td}><Badge status={row.status} /></td>
                     </tr>
                   ))}
