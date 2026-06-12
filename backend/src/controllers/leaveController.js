@@ -192,16 +192,17 @@ exports.apply = asyncHandler(async (req, res) => {
     tl_skipped:    skipTl,
   });
 
-  if (skipTl) {
-    // No TL — route straight to the final approver. Employee requests go to HR;
-    // requests from TLs / HR / superusers go to the Superuser (separation of duties).
-    const approverRole = req.user.role === 'employee' ? 'hr' : 'superuser';
-    const approvers = await User.findAll({ where: { role: approverRole, status: 'active' } });
-    for (const a of approvers) {
-      sendHrNotificationEmail(a.email, req.user, leave, 'N/A (no TL assigned)').catch(() => {});
-    }
-  } else {
-    // Notify the assigned TL
+  // Parallel approval: always notify the final approver (HR for employee
+  // requests, Superuser for TL/HR requests) AND — when one is assigned — the
+  // Team Lead, so both can review in any order. Applies to permissions too
+  // (same flow). Previously only the TL was emailed, so HR never got the request.
+  const approverRole = req.user.role === 'employee' ? 'hr' : 'superuser';
+  const approvers = await User.findAll({ where: { role: approverRole, status: 'active' } });
+  const tlLabel = skipTl ? 'N/A (no TL assigned)' : 'Pending Team Lead review';
+  for (const a of approvers) {
+    sendHrNotificationEmail(a.email, req.user, leave, tlLabel).catch(() => {});
+  }
+  if (!skipTl) {
     const tl = await User.findByPk(req.user.manager_id);
     if (tl) sendTlNotificationEmail(tl.email, req.user, leave).catch(() => {});
   }

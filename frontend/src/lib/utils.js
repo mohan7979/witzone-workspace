@@ -81,13 +81,16 @@ export const leaveTypeLabel = (type) =>
 export const leaveDurationLabel = (leave) => {
   if (!leave) return '—';
   if (leave.type === 'permission' && leave.start_time && leave.end_time) {
+    const win = `${leave.start_time.slice(0, 5)}–${leave.end_time.slice(0, 5)}`;   // from–to (24h)
     const [sh, sm] = leave.start_time.split(':').map(Number);
     const [eh, em] = leave.end_time.split(':').map(Number);
     const mins = (eh * 60 + em) - (sh * 60 + sm);
     if (mins > 0) {
       const h = Math.floor(mins / 60), m = mins % 60;
-      return m ? `${h}h ${m}m` : `${h} hour${h === 1 ? '' : 's'}`;
+      const dur = m ? `${h}h ${m}m` : `${h}h`;
+      return `${win} (${dur})`;
     }
+    return win;
   }
   if (leave.is_half_day) {
     const win = leave.start_time && leave.end_time ? ` (${leave.start_time.slice(0,5)}–${leave.end_time.slice(0,5)})` : '';
