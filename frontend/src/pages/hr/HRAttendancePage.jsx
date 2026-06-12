@@ -151,15 +151,16 @@ export default function HRAttendancePage() {
                   <SortTh label="Break"       sortKey="total_break_seconds" sort={tc.sort} toggleSort={tc.toggleSort} />
                   <SortTh label="Idle"        sortKey="idle_seconds" sort={tc.sort} toggleSort={tc.toggleSort} />
                   <SortTh label="Total Hrs"   sortKey="total_hours"  sort={tc.sort} toggleSort={tc.toggleSort} />
+                  <SortTh label="Effective Hrs" sortKey="effective_hours" sort={tc.sort} toggleSort={tc.toggleSort} />
                   <SortTh label="Status"      sortKey="status"       sort={tc.sort} toggleSort={tc.toggleSort} />
                 </tr>
               </thead>
               <tbody>
                 {isLoading && (
-                  <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>
+                  <tr><td colSpan={11} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>
                 )}
                 {!isLoading && !tc.total && (
-                  <tr><td colSpan={10} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
+                  <tr><td colSpan={11} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>
                     {isWeekend ? `No employees worked on ${formatDate(date)}` : `No ${filter === 'all' ? '' : filter} records for ${formatDate(date)}`}
                   </td></tr>
                 )}
@@ -186,6 +187,7 @@ export default function HRAttendancePage() {
                     <td style={{ ...S.td, color: row.total_break_seconds > 0 ? '#FBBF24' : 'rgba(241,245,249,0.3)', fontVariantNumeric:'tabular-nums' }}>{formatHMS(row.total_break_seconds || 0)}</td>
                     <td style={{ ...S.td, color: (row.idle_seconds || 0) > 1800 ? '#F87171' : 'rgba(241,245,249,0.5)', fontVariantNumeric:'tabular-nums' }}>{row.login_time ? formatHMS(row.idle_seconds || 0) : '—'}</td>
                     <td style={{ ...S.td, fontWeight:600, color:'#F1F5F9' }}>{formatDuration(row.total_hours)}</td>
+                    <td style={{ ...S.td, fontWeight:700, color:'#818CF8' }}>{row.effective_hours != null ? formatDuration(row.effective_hours) : '—'}</td>
                     <td style={S.td}><Badge status={row.status} /></td>
                   </tr>
                 ))}
