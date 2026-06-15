@@ -56,6 +56,7 @@ app.use('/api/attendance', require('./routes/attendance'));
 app.use('/api/leaves', require('./routes/leaves'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/idle', require('./routes/idle'));
+app.use('/api/agent',         require('./routes/agent'));
 app.use('/api/reports',       require('./routes/reports'));
 app.use('/api/master',        require('./routes/master'));
 app.use('/api/announcements', require('./routes/announcements'));

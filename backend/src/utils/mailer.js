@@ -133,6 +133,26 @@ exports.sendTlNotificationEmail = (tlEmail, employee, leave) =>
     </div></div>`
   );
 
+// Alert HR / Superadmin that an employee tried to quit the desktop agent.
+// Sent on EVERY attempt — success (agent stopped) or failure (wrong password).
+exports.sendAgentExitAlertEmail = (recipients, employee, machine, granted, when) =>
+  send(recipients,
+    `${granted ? '🛑 Desktop Agent Stopped' : '⚠️ Desktop Agent Quit Attempt'} — ${employee.first_name} ${employee.last_name}`,
+    `<div style="${baseStyle}"><div style="${cardStyle}">
+      <h2 style="color:#1e293b;margin-top:0">${granted ? '🛑 Desktop Agent Stopped' : '⚠️ Blocked Quit Attempt'}</h2>
+      <p style="color:#475569"><strong>${employee.first_name} ${employee.last_name}</strong> (${employee.employee_id || '—'}) ${granted
+        ? 'entered the correct exit password and <strong>stopped</strong> the Witzone desktop agent.'
+        : '<strong>attempted to quit</strong> the Witzone desktop agent but entered an <strong>incorrect</strong> exit password — the agent is still running.'}</p>
+      <table style="width:100%;border-collapse:collapse;margin:16px 0">
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px;width:120px">Employee</td><td style="font-weight:600;color:#1e293b">${employee.first_name} ${employee.last_name} (${employee.employee_id || '—'})</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Department</td><td style="color:#334155">${employee.department || '—'}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Machine</td><td style="color:#334155">${machine || '—'}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Time</td><td style="color:#334155">${when}</td></tr>
+        <tr><td style="padding:7px 0;color:#94a3b8;font-size:13px">Result</td><td style="font-weight:700;color:${granted ? '#dc2626' : '#d97706'}">${granted ? 'Agent stopped' : 'Blocked — wrong password'}</td></tr>
+      </table>
+    </div></div>`
+  );
+
 // Notify the final approver (HR or Superuser) — ready for final decision
 exports.sendHrNotificationEmail = (hrEmail, employee, leave, tlName) =>
   send(hrEmail,

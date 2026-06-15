@@ -347,10 +347,60 @@ def on_toggle_autostart(icon, item):
     _show_balloon(icon, "Witzone", f"Start with Windows: {state}")
 
 
+def _windows_password_dialog():
+    """Prompt for the admin exit password. Returns the typed text ('' if blank/cancelled)."""
+    try:
+        script = (
+            'Add-Type -AssemblyName Microsoft.VisualBasic;'
+            '$p = [Microsoft.VisualBasic.Interaction]::InputBox('
+            '"Enter the admin exit password to quit the Witzone agent.", "Witzone — Exit", "");'
+            'Write-Output $p'
+        )
+        return subprocess.check_output(
+            ["powershell", "-Command", script], text=True, timeout=120
+        ).strip()
+    except Exception:
+        return ""
+
+
+def report_exit_attempt(password):
+    """Tell the server about a quit attempt (it emails HR/Superadmin every time)
+    and return whether exit is authorized. Fails CLOSED — if the server can't be
+    reached, the agent keeps running so it can't be quit while offline."""
+    if not (auth_token and server_url):
+        return False
+    r = authed_request("POST", "/api/agent/exit-attempt", timeout=15, json={
+        "password": password,
+        "machine_name": socket.gethostname(),
+    })
+    if r is None:
+        return False
+    try:
+        return bool(r.json().get("allow"))
+    except Exception:
+        return False
+
+
 def on_quit(icon, item):
     global running
-    running = False
-    icon.stop()
+    # Quitting is gated by an admin exit password; every attempt is reported to
+    # HR / Superadmin by the server.
+    if is_windows() and getattr(sys, "frozen", False):
+        pwd = _windows_password_dialog()
+    else:
+        try:
+            pwd = input("Admin exit password: ").strip()
+        except EOFError:
+            pwd = ""
+    if not pwd:
+        return  # cancelled / empty → keep running, no attempt logged
+
+    if report_exit_attempt(pwd):
+        _show_balloon(icon, "Witzone", "Agent stopped.")
+        running = False
+        icon.stop()
+    else:
+        _show_balloon(icon, "Witzone", "Incorrect exit password — the agent will keep running. This attempt was reported.")
 
 
 # ---------------------------------------------------------------------------
