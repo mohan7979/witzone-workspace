@@ -13,7 +13,7 @@ router.get('/my',               myLeaves);
 router.get('/:id/document',     viewDocument);     // requester / TL / HR / Superuser
 router.patch('/:id/cancel',     cancel);
 router.get('/pending',          authorize('hr', 'lead'), pendingLeaves);
-router.patch('/:id/tl-review',  authorize('lead'),       tlReview);
+router.patch('/:id/tl-review',  authorize('hr', 'lead'), tlReview);   // lead = employee's TL; hr = slot A on a TL's request (controller enforces)
 router.patch('/:id/hr-review',  authorize('hr'),         hrReview);
 router.post('/reset-annual',    authorize('hr'),         resetAnnualLeaves);
 

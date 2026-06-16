@@ -172,10 +172,15 @@ exports.apply = asyncHandler(async (req, res) => {
       message: `Insufficient ${policy?.label || type} balance. Available: ${req.user[balanceField]} day(s).`,
     });
 
-  // If the employee has no assigned TL, the TL stage is bypassed and the request
-  // goes straight to HR. We flag this with tl_skipped (NOT tl_status='approved'),
-  // so the UI never shows a false "TL Approved" for a review that never happened.
-  const skipTl = !req.user.manager_id;
+  // Approver routing — two parallel slots (tl_status = slot A, hr_status = slot B):
+  //  • Employee       → slot A = their Team Lead (skipped if none → HR only), slot B = HR.
+  //  • Team Lead / HR → slot A = HR, slot B = Superuser — BOTH review IN PARALLEL.
+  //  • Superuser      → slot B = Superuser only (slot A skipped).
+  // tl_skipped flags a bypassed slot A so the UI never shows a false "TL Approved".
+  const requesterIsAdmin = req.user.role === 'lead' || req.user.role === 'hr';
+  const skipTl = requesterIsAdmin ? false
+    : req.user.role === 'superuser' ? true
+    : !req.user.manager_id;
 
   const leave = await Leave.create({
     user_id:  req.user.id,
@@ -192,19 +197,22 @@ exports.apply = asyncHandler(async (req, res) => {
     tl_skipped:    skipTl,
   });
 
-  // Parallel approval: always notify the final approver (HR for employee
-  // requests, Superuser for TL/HR requests) AND — when one is assigned — the
-  // Team Lead, so both can review in any order. Applies to permissions too
-  // (same flow). Previously only the TL was emailed, so HR never got the request.
-  const approverRole = req.user.role === 'employee' ? 'hr' : 'superuser';
-  const approvers = await User.findAll({ where: { role: approverRole, status: 'active' } });
-  const tlLabel = skipTl ? 'N/A (no TL assigned)' : 'Pending Team Lead review';
-  for (const a of approvers) {
-    sendHrNotificationEmail(a.email, req.user, leave, tlLabel).catch(() => {});
-  }
-  if (!skipTl) {
-    const tl = await User.findByPk(req.user.manager_id);
-    if (tl) sendTlNotificationEmail(tl.email, req.user, leave).catch(() => {});
+  // Notify reviewers so both parallel slots can act in any order.
+  if (requesterIsAdmin) {
+    // Team Lead / HR request → HR (slot A) AND Superuser (slot B) both review now.
+    const reviewers = await User.findAll({ where: { role: { [Op.in]: ['hr', 'superuser'] }, status: 'active' } });
+    for (const a of reviewers) sendHrNotificationEmail(a.email, req.user, leave, 'Parallel review — HR & Superuser').catch(() => {});
+  } else {
+    // Employee request → HR always; Superuser request → Superuser. Plus the
+    // assigned Team Lead (slot A) when one exists.
+    const approverRole = req.user.role === 'superuser' ? 'superuser' : 'hr';
+    const approvers = await User.findAll({ where: { role: approverRole, status: 'active' } });
+    const tlLabel = skipTl ? 'N/A (no TL assigned)' : 'Pending Team Lead review';
+    for (const a of approvers) sendHrNotificationEmail(a.email, req.user, leave, tlLabel).catch(() => {});
+    if (!skipTl) {
+      const tl = await User.findByPk(req.user.manager_id);
+      if (tl) sendTlNotificationEmail(tl.email, req.user, leave).catch(() => {});
+    }
   }
 
   res.status(201).json({ message: 'Leave application submitted', leave });
@@ -280,6 +288,7 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
   // order. A request shows in a reviewer's "pending" queue until THEY decide it.
   if (isLead) {
     userWhere.manager_id = req.user.id;
+    userWhere.role       = 'employee';     // a lead reviews their EMPLOYEES; TL requests go to HR + Superuser
     if (status && status !== 'pending') {
       if (status !== 'all') leaveWhere.status = status;
     } else {
@@ -288,10 +297,13 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     }
   } else if (isHR) {
     if (!status || status === 'pending') {
-      // HR can review EMPLOYEE leaves at any time — no longer waits for the TL.
-      leaveWhere.status    = 'pending';
-      leaveWhere.hr_status = null;          // awaiting HR's review
-      userWhere.role       = 'employee';
+      // Parallel: HR reviews EMPLOYEE requests (their hr_status slot) AND TEAM LEAD
+      // requests (HR's tl_status slot, in parallel with the Superuser).
+      leaveWhere.status = 'pending';
+      leaveWhere[Op.or] = [
+        { hr_status: null, '$user.role$': 'employee' },
+        { tl_status: null, '$user.role$': 'lead' },
+      ];
     } else if (status === 'all') {
       // full visibility
     } else {
@@ -325,6 +337,7 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     order:  [['created_at', 'DESC']],
     limit:  parseInt(limit),
     offset: (parseInt(page) - 1) * parseInt(limit),
+    subQuery: false,   // so the $user.role$ OR conditions resolve correctly with limit/offset
   });
   res.json({ total: count, data: rows });
 });
@@ -342,11 +355,15 @@ exports.tlReview = asyncHandler(async (req, res) => {
   if (leave.status !== 'pending')
     return res.status(400).json({ message: 'Leave is no longer pending' });
   if (leave.tl_status !== null)
-    return res.status(400).json({ message: 'This leave has already been reviewed at TL level' });
+    return res.status(400).json({ message: 'This level has already been reviewed' });
 
-  // Only the assigned manager can TL-review
-  if (String(leave.user.manager_id) !== String(req.user.id))
-    return res.status(403).json({ message: 'You are not the assigned TL for this employee' });
+  // Who fills the first parallel slot (tl_status):
+  //  • Employee request  → the employee's assigned Team Lead (manager).
+  //  • Team Lead request → HR (reviews in parallel with the Superuser).
+  const isAssignedTl  = String(leave.user.manager_id) === String(req.user.id);
+  const isHrOnLeadReq = req.user.role === 'hr' && leave.user.role === 'lead';
+  if (!isAssignedTl && !isHrOnLeadReq)
+    return res.status(403).json({ message: 'You are not authorized to review this request at this level' });
 
   await leave.update({
     tl_status:      action,
@@ -363,9 +380,10 @@ exports.tlReview = asyncHandler(async (req, res) => {
   });
 
   const result = await resolveLeaveDecision(leave, req.user, { stage: 'tl' });
+  const nextReviewer = leave.user.role === 'lead' ? 'Superuser' : 'HR';
   const message = action === 'rejected'
     ? 'Leave rejected'
-    : result === 'approved' ? 'Leave approved (both approvals complete)' : 'Approved — awaiting HR review';
+    : result === 'approved' ? 'Leave approved (both approvals complete)' : `Approved — awaiting ${nextReviewer} review`;
   res.json({ message, leave });
 });
 
@@ -405,9 +423,10 @@ exports.hrReview = asyncHandler(async (req, res) => {
   });
 
   const result = await resolveLeaveDecision(leave, req.user, { stage: 'hr' });
+  const otherReviewer = leave.user.role === 'lead' ? 'HR' : 'Team Lead';
   const message = action === 'rejected'
     ? 'Leave rejected'
-    : result === 'approved' ? 'Leave approved (both approvals complete)' : 'Approved — awaiting Team Lead review';
+    : result === 'approved' ? 'Leave approved (both approvals complete)' : `Approved — awaiting ${otherReviewer} review`;
   res.json({ message, leave });
 });
 

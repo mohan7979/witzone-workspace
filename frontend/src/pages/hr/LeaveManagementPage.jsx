@@ -62,19 +62,22 @@ function ReviewModal({ leave, role, onClose }) {
   const qc = useQueryClient();
   const [comment, setComment] = useState('');
   const isTL = role === 'lead';
+  const isHR = role === 'hr';
   const isSuper = role === 'superuser';
+  const reqIsLead = leave.user?.role === 'lead';   // a Team Lead's own request → parallel HR + Superuser
 
-  const reviewFn = isTL
+  // Which parallel slot does THIS reviewer fill?
+  //  slot A (tl_status): the employee's Team Lead — OR HR for a Team Lead's request
+  //  slot B (hr_status): HR/Superuser for an employee — OR Superuser for a Team Lead's request
+  const actsOnSlotA = isTL || (isHR && reqIsLead);
+  const reviewFn = actsOnSlotA
     ? ({ action }) => leaveApi.tlReview(leave.id, { action, comment })
     : ({ action }) => leaveApi.hrReview(leave.id, { action, comment });
 
   const review = useMutation({
     mutationFn: reviewFn,
     onSuccess: (_, { action }) => {
-      toast.success(isTL
-        ? (action === 'approved' ? 'Forwarded to HR for final approval' : 'Leave rejected')
-        : `Leave ${action}`
-      );
+      toast.success(action === 'approved' ? 'Approved' : 'Rejected');
       qc.invalidateQueries(['pending-leaves']);
       qc.invalidateQueries(['dashboard-stats']);
       qc.invalidateQueries(['team-attendance-today']);
@@ -89,8 +92,8 @@ function ReviewModal({ leave, role, onClose }) {
     ['Period',     `${formatDate(leave.start_date)} — ${formatDate(leave.end_date)} (${leave.duration_days}d)`],
     ['Reason',     leave.reason],
     ...(leave.document_note ? [['Document Note', leave.document_note]] : []),
-    ...(!isTL && leave.tlReviewer ? [['TL Reviewer', `${leave.tlReviewer.first_name} ${leave.tlReviewer.last_name}`]] : []),
-    ...(!isTL && leave.tl_comment ? [['TL Comment',  leave.tl_comment]] : []),
+    ...(!actsOnSlotA && leave.tlReviewer ? [[reqIsLead ? 'HR Reviewer' : 'TL Reviewer', `${leave.tlReviewer.first_name} ${leave.tlReviewer.last_name}`]] : []),
+    ...(!actsOnSlotA && leave.tl_comment ? [[reqIsLead ? 'HR Comment' : 'TL Comment',  leave.tl_comment]] : []),
   ];
 
   return (
@@ -105,10 +108,13 @@ function ReviewModal({ leave, role, onClose }) {
             </div>
             <div>
               <p style={{ fontSize:'15px', fontWeight:700, color:'#F1F5F9' }}>
-                {isTL ? 'Team Lead Review' : isSuper ? 'Superuser Review' : 'HR Final Review'}
+                {isTL ? 'Team Lead Review' : isSuper ? 'Superuser Review' : 'HR Review'}
               </p>
               <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>
-                {isTL ? 'Level 1 — Approve to forward to HR' : isSuper ? 'Final authority — TL & HR requests' : 'Level 2 — Final decision'}
+                {reqIsLead ? 'Parallel review — HR & Superuser act independently'
+                  : isTL ? 'Level 1 — Approve to forward to HR'
+                  : isSuper ? 'Final authority — TL & HR requests'
+                  : 'Level 2 — Final decision'}
               </p>
             </div>
           </div>
@@ -143,26 +149,29 @@ function ReviewModal({ leave, role, onClose }) {
 
           {/* Approval chain visual — TL and HR are independent (parallel) */}
           {(() => {
-            const tlState = leave.tl_skipped ? { c:'rgba(203,213,225,0.7)', d:'rgba(148,163,184,0.6)', t:'— no TL' }
+            // Slot A = tl_status, Slot B = hr_status. For a Team Lead's request the
+            // two parallel reviewers are HR (slot A) and Superuser (slot B).
+            const slotALabel = reqIsLead ? 'HR' : 'TL';
+            const slotBLabel = reqIsLead ? 'Superuser' : (isSuper ? 'Superuser' : 'HR');
+            const tlState = leave.tl_skipped ? { c:'rgba(203,213,225,0.7)', d:'rgba(148,163,184,0.6)', t:'— skipped' }
               : leave.tl_status === 'approved' ? { c:'rgba(16,185,129,0.9)', d:'#10B981', t:'✓ Approved' }
               : leave.tl_status === 'rejected' ? { c:'#F87171', d:'#F87171', t:'✗ Rejected' }
-              : isTL ? { c:'#FBBF24', d:'#FBBF24', t:'← You are here' }
+              : actsOnSlotA ? { c:'#FBBF24', d:'#FBBF24', t:'← You are here' }
               : { c:'rgba(241,245,249,0.3)', d:'rgba(255,255,255,0.15)', t:'Pending' };
             const hrState = leave.hr_status === 'approved' ? { c:'rgba(16,185,129,0.9)', d:'#10B981', t:'✓ Approved' }
               : leave.hr_status === 'rejected' ? { c:'#F87171', d:'#F87171', t:'✗ Rejected' }
-              : !isTL ? { c:'#818CF8', d:'#818CF8', t:'← You are here' }
+              : !actsOnSlotA ? { c:'#818CF8', d:'#818CF8', t:'← You are here' }
               : { c:'rgba(241,245,249,0.3)', d:'rgba(255,255,255,0.15)', t:'Pending' };
-            const hrLabel = isSuper ? 'Superuser' : 'HR';
             return (
               <div style={{ display:'flex', alignItems:'center', gap:'8px', padding:'10px 14px', background:'rgba(255,255,255,0.03)', borderRadius:'10px', border:'1px solid rgba(255,255,255,0.05)' }}>
                 <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color:tlState.c }}>
                   <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:tlState.d }} />
-                  TL {tlState.t}
+                  {slotALabel} {tlState.t}
                 </div>
                 <div style={{ flex:1, height:'1px', background:'rgba(255,255,255,0.08)' }} />
                 <div style={{ display:'flex', alignItems:'center', gap:'6px', fontSize:'11px', fontWeight:600, color:hrState.c }}>
                   <div style={{ width:'8px', height:'8px', borderRadius:'50%', background:hrState.d }} />
-                  {hrLabel} {hrState.t}
+                  {slotBLabel} {hrState.t}
                 </div>
               </div>
             );
@@ -245,12 +254,14 @@ export default function LeaveManagementPage() {
   // hr_status is null — neither waits for the other.
   const canReview = (leave) => {
     if (leave.status !== 'pending') return false;
-    if (isLead)    return leave.tl_status === null && !leave.tl_skipped;
-    if (isHRLevel) {
-      if (leave.hr_status != null) return false;
-      if (!isSuper && leave.user?.role && leave.user.role !== 'employee') return false; // HR → employees only
-      return true;
+    const reqRole = leave.user?.role;
+    if (isLead) return leave.tl_status === null && !leave.tl_skipped;
+    if (isHR) {
+      if (reqRole === 'lead')    return leave.tl_status === null;   // HR fills slot A for a TL's request (parallel w/ Superuser)
+      if (reqRole && reqRole !== 'employee') return false;          // HR/Superuser requests → Superuser only
+      return leave.hr_status === null;                              // employee request → HR's slot B
     }
+    if (isSuper) return leave.hr_status === null;                   // Superuser fills slot B
     return false;
   };
 

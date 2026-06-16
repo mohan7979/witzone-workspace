@@ -107,16 +107,20 @@ export const leaveStage = (leave) => {
   if (!leave) return { label: '—', kind: 'pending' };
   if (leave.status === 'approved')  return { label: 'Approved',  kind: 'approved' };
   if (leave.status === 'cancelled') return { label: 'Cancelled', kind: 'cancelled' };
+  // A Team Lead's own request is reviewed by HR (slot A) + Superuser (slot B);
+  // everyone else by their TL (slot A) + HR (slot B).
+  const slotA = leave.user?.role === 'lead' ? 'HR' : 'TL';
+  const slotB = leave.user?.role === 'lead' ? 'Superuser' : 'HR';
   if (leave.status === 'rejected')
     return leave.tl_status === 'rejected'
-      ? { label: 'Rejected by TL', kind: 'rejected' }
-      : { label: 'Rejected by HR', kind: 'rejected' };
-  // pending — TL and HR approve in parallel (either order)
+      ? { label: `Rejected by ${slotA}`, kind: 'rejected' }
+      : { label: `Rejected by ${slotB}`, kind: 'rejected' };
+  // pending — both slots approve in parallel (either order)
   const tlDone = leave.tl_status === 'approved' || leave.tl_skipped;
   const hrDone = leave.hr_status === 'approved';
-  if (tlDone && !hrDone) return { label: 'Pending HR Approval', kind: 'pending' };
-  if (!tlDone && hrDone) return { label: 'Pending TL Approval', kind: 'pending' };
-  return { label: 'Pending TL & HR Approval', kind: 'pending' };
+  if (tlDone && !hrDone) return { label: `Pending ${slotB} Approval`, kind: 'pending' };
+  if (!tlDone && hrDone) return { label: `Pending ${slotA} Approval`, kind: 'pending' };
+  return { label: `Pending ${slotA} & ${slotB} Approval`, kind: 'pending' };
 };
 
 export const getStatusColor = (status) => {
