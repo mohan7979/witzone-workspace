@@ -23,7 +23,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.1.0"
+AGENT_VERSION        = "1.2.0"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
 HEARTBEAT_INTERVAL   = 60   # seconds
 SCREEN_POLL_INTERVAL = 3    # seconds — how often to ask the server "should I capture?"
