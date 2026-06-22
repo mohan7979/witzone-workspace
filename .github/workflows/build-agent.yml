@@ -1,11 +1,12 @@
 name: Build Windows Agent (.exe)
 
 on:
-  # Run automatically when agent code changes
+  # Build AND publish a GitHub Release whenever a version tag (vX.Y.Z) is pushed.
   push:
-    paths:
-      - 'desktop-agent/**'
-  # Also allow manual trigger from GitHub Actions tab
+    tags:
+      - 'v*'
+  # Manual trigger from the Actions tab — builds a downloadable artifact from any
+  # branch (no Release). Use this to test a build without cutting a release.
   workflow_dispatch:
 
 jobs:
