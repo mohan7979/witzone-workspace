@@ -71,6 +71,7 @@ export const reportApi = {
   leaves: (params) => api.get('/reports/leaves', { params }),
   idle: (params) => api.get('/reports/idle', { params }),
   idleHistory: (params) => api.get('/reports/idle-history', { params }),
+  idleHistoryExport: (params) => api.get('/reports/idle-history', { params: { ...params, format: 'xlsx' }, responseType: 'blob' }),
   activity: (params) => api.get('/reports/activity', { params }),
   // File exports (csv|xlsx|pdf) — returns a Blob for client-side download.
   activityExport: (params) => api.get('/reports/activity', { params, responseType: 'blob' }),

@@ -4,7 +4,7 @@ import { useRef, useEffect, useState } from 'react';
 import { idleApi, reportApi, userApi } from '@/api';
 import { formatHMS, formatTime, formatDate } from '@/lib/utils';
 import { useTableControls, TableToolbar, SortTh, Pagination } from '@/components/ui/TableControls';
-import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee, Download, ChevronLeft, ChevronRight, BarChart3, Monitor, RefreshCw } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, WifiOff, Activity, Clock, X, Coffee, Download, ChevronLeft, ChevronRight, BarChart3, Monitor, RefreshCw, ChevronDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import useAuthStore from '@/store/authStore';
 
@@ -268,25 +268,59 @@ const selectStyle = {
   padding: '8px 12px', cursor: 'pointer', outline: 'none', minWidth: '180px',
 };
 
-// Period × scope historical idle / work report (deferred item #6).
+// Compact multi-select (button + checkbox popover). Empty selection = "All".
+function MultiSelect({ label, options, selected, onChange, width = 200 }) {
+  const [open, setOpen] = useState(false);
+  const toggle = (val) => onChange(selected.includes(val) ? selected.filter(v => v !== val) : [...selected, val]);
+  const summary = selected.length === 0 ? `All` : `${selected.length} selected`;
+  return (
+    <div style={{ position: 'relative' }}>
+      <button onClick={() => setOpen(o => !o)} style={{ ...selectStyle, minWidth: width, display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+        <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}: {summary}</span>
+        <ChevronDown size={14} style={{ flexShrink: 0, opacity: 0.6 }} />
+      </button>
+      {open && (
+        <>
+          <div onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 40 }} />
+          <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 41, background: '#0D1117', border: '1px solid rgba(255,255,255,0.12)', borderRadius: '10px', padding: '6px', minWidth: width, maxHeight: '300px', overflowY: 'auto', boxShadow: '0 16px 40px rgba(0,0,0,0.5)' }}>
+            {selected.length > 0 && (
+              <button onClick={() => onChange([])} style={{ width: '100%', textAlign: 'left', padding: '6px 10px', fontSize: '11px', fontWeight: 700, color: '#F87171', background: 'transparent', border: 'none', cursor: 'pointer' }}>Clear selection</button>
+            )}
+            {options.length === 0 && <p style={{ padding: '8px 10px', fontSize: '12px', color: 'rgba(241,245,249,0.4)' }}>No options</p>}
+            {options.map(o => {
+              const on = selected.includes(o.value);
+              return (
+                <label key={o.value} style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 10px', borderRadius: '7px', cursor: 'pointer', fontSize: '12px', color: on ? '#A78BFA' : 'rgba(241,245,249,0.7)', background: on ? 'rgba(167,139,250,0.12)' : 'transparent' }}>
+                  <input type="checkbox" checked={on} onChange={() => toggle(o.value)} style={{ accentColor: '#A78BFA', cursor: 'pointer' }} />
+                  <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{o.label}</span>
+                </label>
+              );
+            })}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// Period × multi-scope historical idle / work report.
 function IdleHistoryReport() {
   const [period, setPeriod] = useState('monthly');
   const [anchor, setAnchor] = useState(() => new Date().toISOString().split('T')[0]);
-  const [scope, setScope]   = useState('global');
-  const [dept, setDept]     = useState('');
-  const [emp, setEmp]       = useState('');
+  const [depts, setDepts]   = useState([]);   // multi-select departments
+  const [emps, setEmps]     = useState([]);   // multi-select employees
 
   const { data: deptData } = useQuery({ queryKey: ['idle-rep-depts'], queryFn: userApi.departments, staleTime: 300000 });
   const departments = deptData?.departments || [];
-  const { data: empData } = useQuery({ queryKey: ['idle-rep-emps'], queryFn: () => userApi.list({ limit: 300, status: 'active' }), staleTime: 300000, enabled: scope === 'employee' });
+  const { data: empData } = useQuery({ queryKey: ['idle-rep-emps'], queryFn: () => userApi.list({ limit: 500, status: 'active' }), staleTime: 300000 });
   const employees = empData?.data || [];
 
   const params = { period, date: anchor };
-  if (scope === 'department' && dept) params.department = dept;
-  if (scope === 'employee'   && emp)  params.user_id = emp;
+  if (depts.length) params.department = depts.join(',');
+  if (emps.length)  params.user_id   = emps.join(',');
 
   const { data, isFetching } = useQuery({
-    queryKey: ['idle-history', period, anchor, scope, dept, emp],
+    queryKey: ['idle-history', period, anchor, depts.join(','), emps.join(',')],
     queryFn: () => reportApi.idleHistory(params),
     keepPreviousData: true,
   });
@@ -315,19 +349,21 @@ function IdleHistoryReport() {
     ? (data.start === data.end ? formatDate(data.start) : `${formatDate(data.start)} — ${formatDate(data.end)}`)
     : '…';
 
-  const exportCsv = () => {
+  const [exporting, setExporting] = useState(false);
+  const exportXlsx = async () => {
     if (!rows.length) { toast.error('Nothing to export'); return; }
-    const head = ['Employee', 'Employee ID', 'Department', 'Present Days', 'Work Hours', 'Idle Time', 'Break Time', 'Effective Hours', 'Idle Events', 'Long Idle (>=30m)'];
-    const body = rows.map(r => [
-      `${r.user.first_name} ${r.user.last_name}`, r.user.employee_id, r.user.department || '',
-      r.present_days, r.work_hours, formatHMS(r.idle_seconds), formatHMS(r.break_seconds), r.effective_hours, r.idle_events, r.long_idle,
-    ]);
-    const csv = [head, ...body].map(line => line.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `idle-report-${period}-${data?.start}_${data?.end}.csv`; a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setExporting(true);
+    try {
+      const blob = await reportApi.idleHistoryExport(params);   // Excel: Summary + Daily Timeline sheets
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = `idle-report-${period}-${data?.start}_${data?.end}.xlsx`; a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch {
+      toast.error('Export failed');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const summary = [
@@ -357,10 +393,10 @@ function IdleHistoryReport() {
             <p style={{ fontSize: '12px', color: 'rgba(241,245,249,0.35)', marginTop: '2px' }}>Idle, work &amp; break time aggregated by period and scope</p>
           </div>
         </div>
-        <button onClick={exportCsv} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#34D399', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', cursor: 'pointer', padding: '8px 14px', borderRadius: '9px' }}
+        <button onClick={exportXlsx} disabled={exporting} style={{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: '#34D399', background: 'rgba(52,211,153,0.1)', border: '1px solid rgba(52,211,153,0.3)', cursor: exporting ? 'wait' : 'pointer', padding: '8px 14px', borderRadius: '9px', opacity: exporting ? 0.6 : 1 }}
           onMouseEnter={e => e.currentTarget.style.background = 'rgba(52,211,153,0.18)'}
           onMouseLeave={e => e.currentTarget.style.background = 'rgba(52,211,153,0.1)'}>
-          <Download size={13} /> Export CSV
+          <Download size={13} /> {exporting ? 'Exporting…' : 'Export Excel'}
         </button>
       </div>
 
@@ -378,23 +414,13 @@ function IdleHistoryReport() {
           <span style={{ fontSize: '12px', fontWeight: 700, color: '#F1F5F9', minWidth: '170px', textAlign: 'center' }}>{rangeLabel}</span>
           <button onClick={() => shiftAnchor(1)} title="Next" style={{ display: 'flex', padding: '7px', borderRadius: '8px', cursor: 'pointer', background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)', color: 'rgba(241,245,249,0.6)' }}><ChevronRight size={15} /></button>
         </div>
-        {/* Scope */}
-        <div style={{ display: 'flex', gap: '6px' }}>
-          {SCOPES.map(s => (
-            <button key={s.key} onClick={() => { setScope(s.key); if (s.key !== 'department') setDept(''); if (s.key !== 'employee') setEmp(''); }} style={seg(scope === s.key)}>{s.label}</button>
-          ))}
-        </div>
-        {scope === 'department' && (
-          <select value={dept} onChange={e => setDept(e.target.value)} style={selectStyle}>
-            <option value="" style={{ background: '#0D1117' }}>All departments</option>
-            {departments.map(d => <option key={d} value={d} style={{ background: '#0D1117' }}>{d}</option>)}
-          </select>
-        )}
-        {scope === 'employee' && (
-          <select value={emp} onChange={e => setEmp(e.target.value)} style={selectStyle}>
-            <option value="" style={{ background: '#0D1117' }}>Select employee…</option>
-            {employees.map(u => <option key={u.id} value={u.id} style={{ background: '#0D1117' }}>{u.first_name} {u.last_name} ({u.employee_id})</option>)}
-          </select>
+        {/* Multi-select filters — pick any number of departments and/or employees */}
+        <MultiSelect label="Departments" width={190} selected={depts} onChange={setDepts}
+          options={departments.map(d => ({ value: d, label: d }))} />
+        <MultiSelect label="Employees" width={230} selected={emps} onChange={setEmps}
+          options={employees.map(u => ({ value: u.id, label: `${u.first_name} ${u.last_name} (${u.employee_id})` }))} />
+        {(depts.length > 0 || emps.length > 0) && (
+          <button onClick={() => { setDepts([]); setEmps([]); }} style={{ fontSize: '11px', fontWeight: 600, color: 'rgba(241,245,249,0.5)', background: 'transparent', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '8px', padding: '7px 10px', cursor: 'pointer' }}>Reset filters</button>
         )}
         {isFetching && <span style={{ fontSize: '11px', color: 'rgba(167,139,250,0.7)' }}>Loading…</span>}
       </div>

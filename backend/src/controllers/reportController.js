@@ -1,8 +1,84 @@
 const { Op, fn, col, literal } = require('sequelize');
 const moment = require('moment');
+const mtz = require('moment-timezone');
+const ExcelJS = require('exceljs');
 const { Attendance, Leave, IdleLog, User } = require('../models');
 const asyncHandler = require('../utils/asyncHandler');
-const { todayIST, nowIST } = require('../utils/ist');
+const { todayIST, nowIST, TZ } = require('../utils/ist');
+
+// ── idle-report formatting + Excel export helpers ─────────────────────────────
+const _hms = (secs) => {
+  const s = Math.max(0, Math.floor(Number(secs) || 0));
+  const p = (n) => String(n).padStart(2, '0');
+  return `${p(Math.floor(s / 3600))}:${p(Math.floor((s % 3600) / 60))}:${p(s % 60)}`;
+};
+const _hrsHms = (hours) => (hours == null ? '—' : _hms(Number(hours) * 3600));   // decimal hours → HH:MM:SS
+const _clock  = (d) => (d ? mtz.tz(d, TZ).format('hh:mm A') : '—');
+const _day    = (d) => (d ? mtz.tz(d, TZ).format('DD-MMM-YYYY') : '—');
+
+async function sendIdleHistoryXlsx(res, { period, startDate, endDate, data, daily }) {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = 'Witzone HRMS';
+
+  // Sheet 1 — per-employee summary over the whole period
+  const sum = wb.addWorksheet('Summary');
+  sum.columns = [
+    { header: 'Employee ID', key: 'eid', width: 12 },
+    { header: 'Employee', key: 'name', width: 24 },
+    { header: 'Department', key: 'dept', width: 16 },
+    { header: 'Present Days', key: 'days', width: 13 },
+    { header: 'Work Time', key: 'work', width: 13 },
+    { header: 'Idle Time', key: 'idle', width: 13 },
+    { header: 'Break Time', key: 'brk', width: 13 },
+    { header: 'Effective Time', key: 'eff', width: 14 },
+    { header: 'Idle Events', key: 'ev', width: 12 },
+    { header: 'Long Idle (>=30m)', key: 'long', width: 16 },
+  ];
+  for (const r of data) sum.addRow({
+    eid: r.user.employee_id, name: `${r.user.first_name} ${r.user.last_name}`, dept: r.user.department || '',
+    days: r.present_days, work: _hrsHms(r.work_hours), idle: _hms(r.idle_seconds),
+    brk: _hms(r.break_seconds), eff: _hrsHms(r.effective_hours), ev: r.idle_events, long: r.long_idle,
+  });
+
+  // Sheet 2 — day-by-day idle / working timeline per employee
+  const tl = wb.addWorksheet('Daily Timeline');
+  tl.columns = [
+    { header: 'Date', key: 'date', width: 13 },
+    { header: 'Employee ID', key: 'eid', width: 12 },
+    { header: 'Employee', key: 'name', width: 24 },
+    { header: 'Department', key: 'dept', width: 16 },
+    { header: 'Clock In', key: 'in', width: 11 },
+    { header: 'Clock Out', key: 'out', width: 11 },
+    { header: '2nd In', key: 'in2', width: 11 },
+    { header: '2nd Out', key: 'out2', width: 11 },
+    { header: 'Work Time', key: 'work', width: 12 },
+    { header: 'Idle Time', key: 'idle', width: 12 },
+    { header: 'Break Time', key: 'brk', width: 12 },
+    { header: 'Effective Time', key: 'eff', width: 13 },
+    { header: 'Status', key: 'status', width: 11 },
+  ];
+  const sorted = daily.slice().sort((a, b) => {
+    const an = `${a.user?.first_name} ${a.user?.last_name}`, bn = `${b.user?.first_name} ${b.user?.last_name}`;
+    return an === bn ? String(a.date).localeCompare(String(b.date)) : an.localeCompare(bn);
+  });
+  for (const a of sorted) tl.addRow({
+    date: _day(a.date), eid: a.user?.employee_id || '',
+    name: `${a.user?.first_name || ''} ${a.user?.last_name || ''}`.trim(), dept: a.user?.department || '',
+    in: _clock(a.login_time), out: _clock(a.logout_time), in2: _clock(a.login_time_2), out2: _clock(a.logout_time_2),
+    work: _hrsHms(a.total_hours), idle: _hms(a.idle_seconds), brk: _hms(a.total_break_seconds),
+    eff: _hrsHms(a.effective_hours), status: a.status,
+  });
+
+  for (const ws of [sum, tl]) {
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6366F1' } };
+    ws.autoFilter = { from: 'A1', to: `${String.fromCharCode(64 + ws.columns.length)}1` };
+  }
+
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="idle-report-${period}-${startDate}_to_${endDate}.xlsx"`);
+  res.send(Buffer.from(await wb.xlsx.writeBuffer()));
+}
 
 const buildUserWhere = (req, extra = {}) => {
   const where = { status: 'active', ...extra };
@@ -119,16 +195,20 @@ function periodWindow(period, anchor) {
  */
 exports.idleHistory = asyncHandler(async (req, res) => {
   const period = ['daily', 'weekly', 'monthly', 'yearly'].includes(req.query.period) ? req.query.period : 'monthly';
-  const { date, department, user_id } = req.query;
+  const { date, department, user_id, format } = req.query;
   const [startM, endM] = periodWindow(period, date);
   const startDate = startM.format('YYYY-MM-DD');
   const endDate   = endM.format('YYYY-MM-DD');
 
-  const userWhere = buildUserWhere(req);
-  if (department) userWhere.department = department;
-  if (user_id)    userWhere.id = user_id;
+  // department and user_id may be comma-separated lists (multi-select filters).
+  const deptList = department ? String(department).split(',').map(s => s.trim()).filter(Boolean) : [];
+  const userList = user_id   ? String(user_id).split(',').map(s => s.trim()).filter(Boolean)   : [];
 
-  const scope = user_id ? 'employee' : department ? 'department' : 'global';
+  const userWhere = buildUserWhere(req);
+  if (deptList.length) userWhere.department = { [Op.in]: deptList };
+  if (userList.length) userWhere.id = { [Op.in]: userList };
+
+  const scope = userList.length ? 'employee' : deptList.length ? 'department' : 'global';
   const zeroTotals = { employees: 0, idle_seconds: 0, idle_events: 0, long_idle: 0, break_seconds: 0, work_hours: 0, effective_hours: 0, present_days: 0 };
 
   // Universe of employees in scope
@@ -138,6 +218,7 @@ exports.idleHistory = asyncHandler(async (req, res) => {
     raw: true,
   });
   if (!users.length) {
+    if (format === 'xlsx') return sendIdleHistoryXlsx(res, { period, startDate, endDate, data: [], daily: [] });
     return res.json({ period, start: startDate, end: endDate, scope, totals: zeroTotals, data: [] });
   }
   const userMap = {};
@@ -206,6 +287,17 @@ exports.idleHistory = asyncHandler(async (req, res) => {
   totals.effective_hours = parseFloat(Math.max(0, totals.work_hours - totals.idle_seconds / 3600).toFixed(2));
 
   data.sort((a, b) => b.idle_seconds - a.idle_seconds);
+
+  if (format === 'xlsx') {
+    // Pull the per-day rows for the same scope + window for the "Daily Timeline" sheet.
+    const daily = await Attendance.findAll({
+      where: { date: { [Op.between]: [startDate, endDate] }, user_id: { [Op.in]: scopedIds } },
+      include: [{ model: User, as: 'user', attributes: ['employee_id', 'first_name', 'last_name', 'department'] }],
+      order: [['date', 'ASC']],
+    });
+    return sendIdleHistoryXlsx(res, { period, startDate, endDate, data, daily });
+  }
+
   res.json({ period, start: startDate, end: endDate, scope, totals, data });
 });
 
