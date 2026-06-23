@@ -23,7 +23,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.2.1"
+AGENT_VERSION        = "1.2.2"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
 HEARTBEAT_INTERVAL   = 60   # seconds between heartbeats once connected
 RECONNECT_INTERVAL   = 10   # seconds between auth retries when not yet connected

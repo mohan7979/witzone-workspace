@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName     "Witzone Workspace Agent"
-#define MyAppVersion  "1.2.1"
+#define MyAppVersion  "1.2.2"
 #define MyAppPublisher "Witzone Technologies"
 #define MyAppExe      "WitzoneAgent.exe"
 
@@ -39,14 +39,22 @@ Source: "dist\{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\Witzone Agent";           Filename: "{app}\{#MyAppExe}"
 Name: "{group}\Uninstall Witzone Agent"; Filename: "{uninstallexe}"
 
+[Registry]
+; Register the agent as a Windows startup app (current user).
+; This makes it appear in Settings → Apps → Startup and auto-run on every login.
+; uninsdeletevalue removes the entry automatically when the user uninstalls.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
+    ValueType: string; ValueName: "WitzoneAgent"; \
+    ValueData: """{app}\{#MyAppExe}"""; Flags: uninsdeletevalue
+
 [Run]
-; Offer to start the agent right after installing.
-Filename: "{app}\{#MyAppExe}"; Description: "Start Witzone Agent now"; Flags: nowait postinstall skipifsilent
+; Launch the agent immediately after install (runs as current user, not elevated).
+Filename: "{app}\{#MyAppExe}"; Description: "Start Witzone Agent now"; \
+    Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
-; Stop the running agent, then clear the per-user autostart entry it created.
+; Stop the running agent before removing files.
 Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExe} /F"; Flags: runhidden; RunOnceId: "KillAgent"
-Filename: "{cmd}"; Parameters: "/C reg delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v WitzoneAgent /f"; Flags: runhidden; RunOnceId: "DelAutostart"
 
 [Code]
 // Stop any running instance before install/upgrade so the .exe isn't locked.
