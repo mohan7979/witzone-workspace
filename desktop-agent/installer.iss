@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName     "Witzone Workspace Agent"
-#define MyAppVersion  "1.2.0"
+#define MyAppVersion  "1.2.1"
 #define MyAppPublisher "Witzone Technologies"
 #define MyAppExe      "WitzoneAgent.exe"
 

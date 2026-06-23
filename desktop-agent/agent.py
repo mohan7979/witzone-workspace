@@ -23,9 +23,10 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.2.0"
+AGENT_VERSION        = "1.2.1"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
-HEARTBEAT_INTERVAL   = 60   # seconds
+HEARTBEAT_INTERVAL   = 60   # seconds between heartbeats once connected
+RECONNECT_INTERVAL   = 10   # seconds between auth retries when not yet connected
 SCREEN_POLL_INTERVAL = 3    # seconds — how often to ask the server "should I capture?"
 SCREEN_MAX_WIDTH     = 1280  # downscale captured frames to keep them small
 SCREEN_JPEG_QUALITY  = 40
@@ -50,6 +51,7 @@ current_user   = None
 running        = True
 saved_email    = None    # kept so the agent can silently re-login when its token expires
 saved_password = None
+tray_icon      = None    # set in main() before tray.run(); background threads use this
 
 
 # ---------------------------------------------------------------------------
@@ -161,8 +163,8 @@ def validate_token(url, token):
 
 
 def reauthenticate():
-    """Silently re-login with the saved credentials when the token has expired,
-    so heartbeats never die mid-shift. Returns True on success."""
+    """Silently re-login with saved credentials.
+    Returns True on success, None on network error (retry later), False on bad credentials."""
     global auth_token
     if not (server_url and saved_email and saved_password):
         return False
@@ -175,11 +177,14 @@ def reauthenticate():
         if r.ok:
             auth_token = r.json()["token"]
             save_config(server_url, auth_token)
-            print(f"[{datetime.now().strftime('%H:%M:%S')}] Token expired — re-authenticated.")
+            print(f"[{datetime.now().strftime('%H:%M:%S')}] Re-authenticated successfully.")
             return True
+        # Server reachable but rejected credentials (401/400)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] Re-authentication rejected (HTTP {r.status_code}).")
+        return False
     except requests.exceptions.RequestException:
-        pass
-    return False
+        # Network not ready — caller should retry later, not treat as auth failure
+        return None
 
 
 def _auth_headers():
@@ -201,8 +206,30 @@ def authed_request(method, path, **kwargs):
 
 
 def send_heartbeat():
-    if not auth_token or not server_url:
+    global auth_token, current_user
+    if not server_url:
         return
+
+    # Case A: no token at all — try to authenticate with saved credentials
+    if not auth_token:
+        if not (saved_email and saved_password):
+            return  # no credentials saved; waiting for manual login
+        result = reauthenticate()
+        if result is not True:
+            return  # None = network not ready yet; False = bad creds; retry next cycle
+        # Fall through: auth_token now set
+
+    # Case B: have a token but current_user is unknown (e.g. network was down at startup,
+    # we used the saved token optimistically, or we just re-authenticated above)
+    if current_user is None:
+        user = validate_token(server_url, auth_token)
+        if user:
+            current_user = user
+            _update_tray_icon(user)
+        # If validate_token returned None (network hiccup or expired token), fall through
+        # and send the heartbeat anyway — authed_request will handle a 401 by calling
+        # reauthenticate() and retrying, so the heartbeat will still go through.
+
     authed_request("POST", "/api/idle/heartbeat", timeout=10, json={
         "idle_seconds":  get_idle_seconds(),
         "machine_name":  socket.gethostname(),
@@ -249,6 +276,11 @@ def screen_loop():
 
 
 def heartbeat_loop():
+    # Fast-poll until we have a confirmed user (handles network-not-ready at Windows startup)
+    while running and current_user is None:
+        send_heartbeat()          # tries reauth if needed; sets current_user on success
+        time.sleep(RECONNECT_INTERVAL)
+    # Normal cadence once connected
     while running:
         send_heartbeat()
         time.sleep(HEARTBEAT_INTERVAL)
@@ -273,6 +305,25 @@ def make_icon(authenticated=True):
         draw  = ImageDraw.Draw(img)
         draw.ellipse([16, 16, 48, 48], fill=color)
         return img
+
+
+# ---------------------------------------------------------------------------
+# Tray helpers
+# ---------------------------------------------------------------------------
+
+def _update_tray_icon(user):
+    """Update tray tooltip and icon brightness from a background thread.
+    Called after silent re-authentication so the tray reflects the active user."""
+    global tray_icon
+    if tray_icon is None:
+        return
+    try:
+        name = f"{user['first_name']} {user['last_name']}"
+        tray_icon.title = f"Witzone — {name}"
+        tray_icon.icon  = make_icon(authenticated=True)
+        _show_balloon(tray_icon, "Witzone", f"Connected — {name}")
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -444,7 +495,7 @@ def _show_balloon(icon, title, message):
 # ---------------------------------------------------------------------------
 
 def main():
-    global auth_token, server_url, current_user, running, saved_email, saved_password
+    global auth_token, server_url, current_user, running, saved_email, saved_password, tray_icon
 
     # Load and validate saved credentials
     cfg = load_config()
@@ -465,15 +516,27 @@ def main():
         if saved_url and saved_token:
             user = validate_token(saved_url, saved_token)
             if user:
+                # Best case: token valid and server reachable
                 auth_token   = saved_token
                 current_user = user
                 print(f"Session active: {user['first_name']} {user['last_name']} ({user.get('employee_id', '')})")
-            elif reauthenticate():
-                current_user = validate_token(server_url, auth_token)
-                name = current_user or {}
-                print(f"Re-authenticated with saved credentials ({name.get('employee_id', '') if isinstance(name, dict) else ''}).")
             else:
-                print("Saved session expired — please log in again via the tray icon.")
+                # validate_token failed — could be network down (common at Windows startup)
+                # OR the token genuinely expired.  Try a fresh login with saved credentials.
+                reauth = reauthenticate()
+                if reauth is True:
+                    # Fresh token acquired
+                    current_user = validate_token(server_url, auth_token)
+                    name = current_user or {}
+                    print(f"Re-authenticated ({name.get('employee_id', '') if isinstance(name, dict) else ''}).")
+                elif reauth is None:
+                    # Network not ready (RequestException) — keep the saved token and let
+                    # the heartbeat loop verify + update current_user once the network is up.
+                    auth_token = saved_token
+                    print("Network not ready at startup — will reconnect automatically when available.")
+                else:
+                    # Server reachable but rejected credentials → truly need manual re-login
+                    print("Credentials rejected — please log in again via the tray icon.")
 
     # Input listeners
     ml = mouse.Listener(on_move=record_activity, on_click=record_activity, on_scroll=record_activity)
@@ -488,10 +551,13 @@ def main():
 
     # Tray setup
     authenticated = current_user is not None
-    title = (
-        f"Witzone — {current_user['first_name']} {current_user['last_name']}"
-        if authenticated else "Witzone — Not logged in (right-click to login)"
-    )
+    connecting    = bool(auth_token and not current_user)  # saved token but no network yet
+    if authenticated:
+        title = f"Witzone — {current_user['first_name']} {current_user['last_name']}"
+    elif connecting:
+        title = "Witzone — Connecting..."
+    else:
+        title = "Witzone — Not logged in (right-click to login)"
 
     autostart_label = lambda item: (
         "✓ Start with Windows" if get_autostart() else "  Start with Windows"
@@ -507,7 +573,8 @@ def main():
         pystray.MenuItem("Quit", on_quit),
     )
 
-    tray = pystray.Icon(APP_NAME, make_icon(authenticated), title, menu)
+    tray = pystray.Icon(APP_NAME, make_icon(authenticated or connecting), title, menu)
+    tray_icon = tray  # expose to background threads so they can update icon/title on reconnect
     print(f"Witzone Agent running — {title}")
     tray.run()
 
