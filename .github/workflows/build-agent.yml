@@ -9,6 +9,9 @@ on:
   # branch (no Release). Use this to test a build without cutting a release.
   workflow_dispatch:
 
+permissions:
+  contents: write   # required to create GitHub Releases and upload assets
+
 jobs:
   build-windows:
     runs-on: windows-latest
