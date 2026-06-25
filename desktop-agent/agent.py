@@ -23,7 +23,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.2.2"
+AGENT_VERSION        = "1.2.3"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
 HEARTBEAT_INTERVAL   = 60   # seconds between heartbeats once connected
 RECONNECT_INTERVAL   = 10   # seconds between auth retries when not yet connected
@@ -491,11 +491,46 @@ def _show_balloon(icon, title, message):
 
 
 # ---------------------------------------------------------------------------
+# Startup helper
+# ---------------------------------------------------------------------------
+
+def _wait_for_shell():
+    """Wait until the Windows taskbar exists before registering the tray icon.
+
+    When the agent is launched via the registry Run key or a startup task,
+    Windows starts it before explorer.exe has finished creating the notification
+    area.  Calling pystray.Icon.run() too early silently drops the icon — the
+    process runs but never appears in the tray.
+
+    We poll for 'Shell_TrayWnd' (the taskbar window class) and only proceed
+    once it is visible.  On a fast machine this returns in under a second; on
+    a slow first-boot it may take 10-20 s.  The 60 s ceiling is a last-resort
+    fallback so the agent never hangs indefinitely.
+    """
+    if not is_windows() or not getattr(sys, 'frozen', False):
+        return   # dev mode or non-Windows — no delay needed
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        for _ in range(60):
+            if user32.FindWindowW('Shell_TrayWnd', None):
+                time.sleep(2)   # small buffer after the taskbar is detected
+                return
+            time.sleep(1)
+    except Exception:
+        time.sleep(10)   # ctypes unavailable — blind wait as a fallback
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
 def main():
     global auth_token, server_url, current_user, running, saved_email, saved_password, tray_icon
+
+    # On Windows startup the agent may launch before the taskbar is ready.
+    # Wait for Shell_TrayWnd before doing anything else so pystray can register.
+    _wait_for_shell()
 
     # Load and validate saved credentials
     cfg = load_config()
