@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName     "Witzone Workspace Agent"
-#define MyAppVersion  "1.2.3"
+#define MyAppVersion  "1.2.4"
 #define MyAppPublisher "Witzone Technologies"
 #define MyAppExe      "WitzoneAgent.exe"
 
@@ -39,22 +39,29 @@ Source: "dist\{#MyAppExe}"; DestDir: "{app}"; Flags: ignoreversion
 Name: "{group}\Witzone Agent";           Filename: "{app}\{#MyAppExe}"
 Name: "{group}\Uninstall Witzone Agent"; Filename: "{uninstallexe}"
 
-[Registry]
-; Register the agent as a Windows startup app (current user).
-; This makes it appear in Settings → Apps → Startup and auto-run on every login.
-; uninsdeletevalue removes the entry automatically when the user uninstalls.
-Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; \
-    ValueType: string; ValueName: "WitzoneAgent"; \
-    ValueData: """{app}\{#MyAppExe}"""; Flags: uninsdeletevalue
-
 [Run]
-; Launch the agent immediately after install (runs as current user, not elevated).
+; 1. Remove any legacy HKCU\Run entry from older installs to prevent double-launch.
+Filename: "reg.exe"; \
+    Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v WitzoneAgent /f"; \
+    Flags: runhidden; StatusMsg: "Cleaning up old startup entry..."
+
+; 2. Register a Task Scheduler task that fires 30 s after the user logs in.
+;    The 30-second delay ensures the taskbar/notification area exists before
+;    pystray tries to register the tray icon — HKCU\Run fires too early on
+;    most machines and the icon silently fails to appear.
+Filename: "schtasks.exe"; \
+    Parameters: "/Create /TN ""WitzoneAgent"" /TR """"""{app}\{#MyAppExe}"""""" /SC ONLOGON /DELAY 0000:30 /IT /RL LIMITED /F"; \
+    Flags: runhidden waituntilterminated; StatusMsg: "Registering startup task..."
+
+; 3. Launch the agent right now so the employee doesn't have to reboot.
 Filename: "{app}\{#MyAppExe}"; Description: "Start Witzone Agent now"; \
     Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
-; Stop the running agent before removing files.
+; Stop the running agent, then remove the startup task.
 Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExe} /F"; Flags: runhidden; RunOnceId: "KillAgent"
+Filename: "schtasks.exe"; Parameters: "/Delete /TN ""WitzoneAgent"" /F"; \
+    Flags: runhidden; RunOnceId: "DelTask"
 
 [Code]
 // Stop any running instance before install/upgrade so the .exe isn't locked.

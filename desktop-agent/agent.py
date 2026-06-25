@@ -23,7 +23,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.2.3"
+AGENT_VERSION        = "1.2.4"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
 HEARTBEAT_INTERVAL   = 60   # seconds between heartbeats once connected
 RECONNECT_INTERVAL   = 10   # seconds between auth retries when not yet connected
@@ -87,47 +87,108 @@ def save_config(url, token, email=None, password=None):
 # Windows startup registration
 # ---------------------------------------------------------------------------
 
+TASK_NAME  = "WitzoneAgent"          # Task Scheduler task name
+STARTUP_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
 def is_windows():
     return sys.platform == "win32"
 
 
+def _exe_path():
+    return sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0])
+
+
+def _schtasks(*args, timeout=15):
+    """Run schtasks.exe silently and return True on success."""
+    try:
+        r = subprocess.run(
+            ["schtasks"] + list(args),
+            capture_output=True, timeout=timeout,
+            creationflags=0x08000000,   # CREATE_NO_WINDOW
+        )
+        return r.returncode == 0
+    except Exception:
+        return False
+
+
 def set_autostart(enable: bool):
-    """Add or remove the agent from Windows startup registry."""
+    """Register / remove the agent startup task via Windows Task Scheduler.
+
+    Task Scheduler fires the agent ~30 s after the user logs in, which is
+    long enough for explorer.exe and the notification area to be fully ready.
+    HKCU\\Run fires immediately at login — before the tray exists — so the
+    icon silently disappears on many machines.
+
+    Also removes any legacy HKCU\\Run entry left by older versions so the
+    agent does not launch twice.
+    """
     if not is_windows():
         return False
+    exe = _exe_path()
     try:
-        import winreg
-        key = winreg.OpenKey(
-            winreg.HKEY_CURRENT_USER, STARTUP_KEY,
-            0, winreg.KEY_SET_VALUE | winreg.KEY_QUERY_VALUE,
-        )
+        # Always clean up the old registry-based entry so we never double-launch.
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
+            winreg.DeleteValue(k, TASK_NAME)
+            winreg.CloseKey(k)
+        except Exception:
+            pass   # key may not exist — that is fine
+
         if enable:
-            exe_path = sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0])
-            winreg.SetValueEx(key, APP_NAME, 0, winreg.REG_SZ, f'"{exe_path}"')
+            # /SC ONLOGON  — trigger: user logs on
+            # /DELAY 0000:30  — wait 30 s after logon (MMMM:SS format)
+            # /IT  — only run when a user is interactively logged on
+            # /RL LIMITED  — run with standard (non-elevated) privileges
+            # /F  — overwrite if already exists
+            ok = _schtasks(
+                "/Create",
+                "/TN", TASK_NAME,
+                "/TR", f'"{exe}"',
+                "/SC", "ONLOGON",
+                "/DELAY", "0000:30",
+                "/IT",
+                "/RL", "LIMITED",
+                "/F",
+            )
+            return ok
         else:
-            try:
-                winreg.DeleteValue(key, APP_NAME)
-            except FileNotFoundError:
-                pass
-        winreg.CloseKey(key)
-        return True
+            return _schtasks("/Delete", "/TN", TASK_NAME, "/F")
     except Exception as e:
         print(f"Autostart error: {e}")
         return False
 
 
 def get_autostart():
-    """Return True if agent is registered in Windows startup."""
+    """Return True if the startup task exists in Task Scheduler."""
     if not is_windows():
         return False
+    # Check Task Scheduler task (current method)
+    if _schtasks("/Query", "/TN", TASK_NAME):
+        return True
+    # Also check legacy registry key (set by older agent versions)
     try:
         import winreg
-        key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE)
-        winreg.QueryValueEx(key, APP_NAME)
-        winreg.CloseKey(key)
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE)
+        winreg.QueryValueEx(k, TASK_NAME)
+        winreg.CloseKey(k)
         return True
     except Exception:
         return False
+
+
+def _ensure_single_instance():
+    """Allow only one running copy of the agent. If another instance already
+    holds the mutex, exit immediately (second launch from duplicate startup)."""
+    if not is_windows():
+        return
+    try:
+        import ctypes
+        ctypes.windll.kernel32.CreateMutexW(None, True, "WitzoneAgentMutex_v1")
+        if ctypes.windll.kernel32.GetLastError() == 183:   # ERROR_ALREADY_EXISTS
+            sys.exit(0)
+    except Exception:
+        pass
 
 
 # ---------------------------------------------------------------------------
@@ -528,9 +589,28 @@ def _wait_for_shell():
 def main():
     global auth_token, server_url, current_user, running, saved_email, saved_password, tray_icon
 
-    # On Windows startup the agent may launch before the taskbar is ready.
-    # Wait for Shell_TrayWnd before doing anything else so pystray can register.
+    # Prevent two instances running at once (e.g. both HKCU\Run and Task Scheduler
+    # firing on the same login session after an upgrade).
+    _ensure_single_instance()
+
+    # Safety net: wait for the taskbar before creating the tray icon.
+    # Task Scheduler /DELAY already handles this at the OS level, but we keep
+    # this as a belt-and-suspenders guard for manual launches too.
     _wait_for_shell()
+
+    # Migrate legacy HKCU\Run entry → Task Scheduler (first run after upgrade).
+    # Silently upgrades users who previously clicked "Start with Windows" on an
+    # older version so they don't need to toggle it off and on again.
+    if is_windows() and getattr(sys, "frozen", False):
+        try:
+            import winreg
+            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE)
+            winreg.QueryValueEx(k, TASK_NAME)
+            winreg.CloseKey(k)
+            # Legacy key found — replace it with the Task Scheduler task
+            set_autostart(True)
+        except Exception:
+            pass   # key not present — nothing to migrate
 
     # Load and validate saved credentials
     cfg = load_config()
@@ -573,11 +653,16 @@ def main():
                     # Server reachable but rejected credentials → truly need manual re-login
                     print("Credentials rejected — please log in again via the tray icon.")
 
-    # Input listeners
-    ml = mouse.Listener(on_move=record_activity, on_click=record_activity, on_scroll=record_activity)
-    kl = keyboard.Listener(on_press=record_activity)
-    ml.start()
-    kl.start()
+    # Input listeners — wrapped so a hook-permission failure at startup never
+    # crashes the agent; idle tracking simply won't work in that case.
+    ml = kl = None
+    try:
+        ml = mouse.Listener(on_move=record_activity, on_click=record_activity, on_scroll=record_activity)
+        kl = keyboard.Listener(on_press=record_activity)
+        ml.start()
+        kl.start()
+    except Exception as e:
+        print(f"Input listener error (idle tracking disabled): {e}")
 
     # Heartbeat thread
     threading.Thread(target=heartbeat_loop, daemon=True).start()
@@ -615,8 +700,8 @@ def main():
 
     # Cleanup
     running = False
-    ml.stop()
-    kl.stop()
+    if ml: ml.stop()
+    if kl: kl.stop()
 
 
 if __name__ == "__main__":
