@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName     "Witzone Workspace Agent"
-#define MyAppVersion  "1.2.4"
+#define MyAppVersion  "1.2.5"
 #define MyAppPublisher "Witzone Technologies"
 #define MyAppExe      "WitzoneAgent.exe"
 
@@ -45,12 +45,13 @@ Filename: "reg.exe"; \
     Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v WitzoneAgent /f"; \
     Flags: runhidden; StatusMsg: "Cleaning up old startup entry..."
 
-; 2. Register a Task Scheduler task that fires 30 s after the user logs in.
-;    The 30-second delay ensures the taskbar/notification area exists before
-;    pystray tries to register the tray icon — HKCU\Run fires too early on
-;    most machines and the icon silently fails to appear.
-Filename: "schtasks.exe"; \
-    Parameters: "/Create /TN ""WitzoneAgent"" /TR """"""{app}\{#MyAppExe}"""""" /SC ONLOGON /DELAY 0000:30 /IT /RL LIMITED /F"; \
+; 2. Register a Task Scheduler task via PowerShell (avoids all schtasks /TR
+;    quoting issues and the /IT-without-/RU silent-failure bug).
+;    -AtLogOn -User $env:USERNAME  — fires only for the installing user.
+;    $t.Delay = 'PT30S'            — 30-second ISO-8601 delay after logon so
+;    the notification area exists before pystray registers the tray icon.
+Filename: "powershell.exe"; \
+    Parameters: "-WindowStyle Hidden -NonInteractive -Command ""$u = $env:USERNAME; $a = New-ScheduledTaskAction -Execute '{app}\{#MyAppExe}'; $t = New-ScheduledTaskTrigger -AtLogOn -User $u; $t.Delay = 'PT30S'; $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0; $p = New-ScheduledTaskPrincipal -UserId $u -RunLevel Limited; Register-ScheduledTask -TaskName 'WitzoneAgent' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null"""; \
     Flags: runhidden waituntilterminated; StatusMsg: "Registering startup task..."
 
 ; 3. Launch the agent right now so the employee doesn't have to reboot.

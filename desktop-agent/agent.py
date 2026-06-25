@@ -23,8 +23,9 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.2.4"
+AGENT_VERSION        = "1.2.5"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
+LOG_FILE             = os.path.join(os.path.expanduser("~"), "witzone_agent.log")
 HEARTBEAT_INTERVAL   = 60   # seconds between heartbeats once connected
 RECONNECT_INTERVAL   = 10   # seconds between auth retries when not yet connected
 SCREEN_POLL_INTERVAL = 3    # seconds — how often to ask the server "should I capture?"
@@ -42,6 +43,16 @@ def resource_path(rel):
 
 
 ICON_FILE = resource_path("witzone.png")  # Witzone logo for the system-tray icon
+
+
+def _log(msg):
+    """Append a timestamped diagnostic line to a persistent log file.
+    Essential on console=False PyInstaller builds where stdout is not visible."""
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            f.write(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n")
+    except Exception:
+        pass
 
 # Shared state
 last_activity  = time.time()
@@ -98,75 +109,91 @@ def _exe_path():
     return sys.executable if getattr(sys, "frozen", False) else os.path.abspath(sys.argv[0])
 
 
-def _schtasks(*args, timeout=15):
-    """Run schtasks.exe silently and return True on success."""
+def _run_ps(command, timeout=30):
+    """Run a PowerShell command silently. Returns (returncode, stderr_text)."""
     try:
         r = subprocess.run(
-            ["schtasks"] + list(args),
-            capture_output=True, timeout=timeout,
-            creationflags=0x08000000,   # CREATE_NO_WINDOW
+            ['powershell', '-WindowStyle', 'Hidden', '-NonInteractive', '-Command', command],
+            capture_output=True, timeout=timeout, creationflags=0x08000000,
         )
-        return r.returncode == 0
-    except Exception:
-        return False
+        return r.returncode, r.stderr.decode(errors='ignore')
+    except Exception as e:
+        return -1, str(e)
 
 
 def set_autostart(enable: bool):
-    """Register / remove the agent startup task via Windows Task Scheduler.
+    """Register / remove the agent startup task via PowerShell Register-ScheduledTask.
 
-    Task Scheduler fires the agent ~30 s after the user logs in, which is
-    long enough for explorer.exe and the notification area to be fully ready.
-    HKCU\\Run fires immediately at login — before the tray exists — so the
-    icon silently disappears on many machines.
+    Uses PowerShell instead of schtasks.exe — the schtasks /IT flag requires /RU
+    to also be specified; without it schtasks silently fails and returns non-zero.
+    PowerShell's Register-ScheduledTask has no such restriction and avoids all
+    the /TR quoting pitfalls of the schtasks CLI.
 
-    Also removes any legacy HKCU\\Run entry left by older versions so the
-    agent does not launch twice.
+    The task runs as the current user (not SYSTEM) with a 30-second logon delay
+    so the notification area is fully ready before pystray registers the tray icon.
+    Also removes any legacy HKCU\\Run entry left by older versions.
     """
     if not is_windows():
         return False
     exe = _exe_path()
-    try:
-        # Always clean up the old registry-based entry so we never double-launch.
-        try:
-            import winreg
-            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
-            winreg.DeleteValue(k, TASK_NAME)
-            winreg.CloseKey(k)
-        except Exception:
-            pass   # key may not exist — that is fine
 
-        if enable:
-            # /SC ONLOGON  — trigger: user logs on
-            # /DELAY 0000:30  — wait 30 s after logon (MMMM:SS format)
-            # /IT  — only run when a user is interactively logged on
-            # /RL LIMITED  — run with standard (non-elevated) privileges
-            # /F  — overwrite if already exists
-            ok = _schtasks(
-                "/Create",
-                "/TN", TASK_NAME,
-                "/TR", f'"{exe}"',
-                "/SC", "ONLOGON",
-                "/DELAY", "0000:30",
-                "/IT",
-                "/RL", "LIMITED",
-                "/F",
-            )
-            return ok
+    # Always remove the legacy HKCU\Run entry so the agent never double-launches.
+    try:
+        import winreg
+        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
+        winreg.DeleteValue(k, TASK_NAME)
+        winreg.CloseKey(k)
+    except Exception:
+        pass
+
+    if not enable:
+        rc, _ = _run_ps(
+            "Unregister-ScheduledTask -TaskName 'WitzoneAgent' "
+            "-Confirm:$false -ErrorAction SilentlyContinue",
+            timeout=20,
+        )
+        _log("set_autostart: task removed")
+        return True
+
+    try:
+        import getpass
+        username = getpass.getuser()
+        exe_safe = exe.replace("'", "''")   # escape for PS single-quoted string
+        ps = (
+            f"$u = '{username}';"
+            f"$a = New-ScheduledTaskAction -Execute '{exe_safe}';"
+            f"$t = New-ScheduledTaskTrigger -AtLogOn -User $u;"
+            f"$t.Delay = 'PT30S';"
+            f"$s = New-ScheduledTaskSettingsSet "
+            f"-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0;"
+            f"$p = New-ScheduledTaskPrincipal -UserId $u -RunLevel Limited;"
+            f"Register-ScheduledTask -TaskName 'WitzoneAgent' "
+            f"-Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null"
+        )
+        rc, stderr = _run_ps(ps, timeout=30)
+        if rc == 0:
+            _log(f"set_autostart: task created for user='{username}' exe='{exe}'")
+            return True
         else:
-            return _schtasks("/Delete", "/TN", TASK_NAME, "/F")
+            _log(f"set_autostart FAILED rc={rc}: {stderr[:300]}")
+            return False
     except Exception as e:
-        print(f"Autostart error: {e}")
+        _log(f"set_autostart exception: {e}")
         return False
 
 
 def get_autostart():
-    """Return True if the startup task exists in Task Scheduler."""
+    """Return True if a WitzoneAgent startup task exists in Task Scheduler."""
     if not is_windows():
         return False
-    # Check Task Scheduler task (current method)
-    if _schtasks("/Query", "/TN", TASK_NAME):
+    rc, _ = _run_ps(
+        "if (Get-ScheduledTask -TaskName 'WitzoneAgent' "
+        "-ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
+        timeout=10,
+    )
+    if rc == 0:
         return True
-    # Also check legacy registry key (set by older agent versions)
+    # Also accept the legacy HKCU\Run entry (upgrade path from older versions)
     try:
         import winreg
         k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE)
@@ -453,10 +480,13 @@ def on_toggle_autostart(icon, item):
         print("Autostart is only supported on Windows.")
         return
     enabled = get_autostart()
-    set_autostart(not enabled)
-    state = "enabled" if not enabled else "disabled"
-    print(f"Autostart {state}.")
-    _show_balloon(icon, "Witzone", f"Start with Windows: {state}")
+    ok = set_autostart(not enabled)
+    if ok:
+        state = "enabled" if not enabled else "disabled"
+        _show_balloon(icon, "Witzone", f"Start with Windows: {state}")
+    else:
+        _show_balloon(icon, "Witzone",
+                      "Startup setup failed — see witzone_agent.log in your home folder")
 
 
 def _windows_password_dialog():
@@ -589,14 +619,19 @@ def _wait_for_shell():
 def main():
     global auth_token, server_url, current_user, running, saved_email, saved_password, tray_icon
 
+    _log(f"=== Agent v{AGENT_VERSION} starting (frozen={getattr(sys,'frozen',False)}) ===")
+    _log(f"  exe={_exe_path()}")
+
     # Prevent two instances running at once (e.g. both HKCU\Run and Task Scheduler
     # firing on the same login session after an upgrade).
     _ensure_single_instance()
+    _log("Single instance check passed")
 
     # Safety net: wait for the taskbar before creating the tray icon.
-    # Task Scheduler /DELAY already handles this at the OS level, but we keep
-    # this as a belt-and-suspenders guard for manual launches too.
+    # Task Scheduler PT30S delay already handles this at the OS level, but we
+    # keep this as a belt-and-suspenders guard for manual launches too.
     _wait_for_shell()
+    _log("Shell ready")
 
     # Migrate legacy HKCU\Run entry → Task Scheduler (first run after upgrade).
     # Silently upgrades users who previously clicked "Start with Windows" on an
@@ -608,9 +643,11 @@ def main():
             winreg.QueryValueEx(k, TASK_NAME)
             winreg.CloseKey(k)
             # Legacy key found — replace it with the Task Scheduler task
+            _log("Migrating legacy HKCU\\Run → Task Scheduler")
             set_autostart(True)
         except Exception:
             pass   # key not present — nothing to migrate
+    _log(f"startup_task_exists={get_autostart()}")
 
     # Load and validate saved credentials
     cfg = load_config()
@@ -652,6 +689,9 @@ def main():
                 else:
                     # Server reachable but rejected credentials → truly need manual re-login
                     print("Credentials rejected — please log in again via the tray icon.")
+
+    _log(f"config loaded: server={server_url} authenticated={current_user is not None} "
+         f"has_token={bool(auth_token)} has_creds={bool(saved_email)}")
 
     # Input listeners — wrapped so a hook-permission failure at startup never
     # crashes the agent; idle tracking simply won't work in that case.
@@ -695,8 +735,10 @@ def main():
 
     tray = pystray.Icon(APP_NAME, make_icon(authenticated or connecting), title, menu)
     tray_icon = tray  # expose to background threads so they can update icon/title on reconnect
+    _log(f"tray.run() starting — {title}")
     print(f"Witzone Agent running — {title}")
     tray.run()
+    _log("tray.run() returned (agent shutting down)")
 
     # Cleanup
     running = False
