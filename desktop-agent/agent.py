@@ -23,7 +23,7 @@ import pystray
 from PIL import Image, ImageDraw, ImageGrab
 from pynput import mouse, keyboard
 
-AGENT_VERSION        = "1.2.5"
+AGENT_VERSION        = "1.2.6"
 CONFIG_FILE          = os.path.join(os.path.expanduser("~"), ".bpo_agent.cfg")
 LOG_FILE             = os.path.join(os.path.expanduser("~"), "witzone_agent.log")
 HEARTBEAT_INTERVAL   = 60   # seconds between heartbeats once connected
@@ -122,81 +122,62 @@ def _run_ps(command, timeout=30):
 
 
 def set_autostart(enable: bool):
-    """Register / remove the agent startup task via PowerShell Register-ScheduledTask.
+    """Register / remove the agent via HKCU\\Run.
 
-    Uses PowerShell instead of schtasks.exe — the schtasks /IT flag requires /RU
-    to also be specified; without it schtasks silently fails and returns non-zero.
-    PowerShell's Register-ScheduledTask has no such restriction and avoids all
-    the /TR quoting pitfalls of the schtasks CLI.
+    HKCU (the user's own registry hive) is writable by any user without admin
+    rights — unlike Task Scheduler which requires elevated permissions on many
+    corporate/BPO Windows configurations (Group Policy restricts task creation).
 
-    The task runs as the current user (not SYSTEM) with a 30-second logon delay
-    so the notification area is fully ready before pystray registers the tray icon.
-    Also removes any legacy HKCU\\Run entry left by older versions.
+    The HKCU\\Run timing race (fires before the taskbar exists) is handled by
+    _wait_for_shell(), which blocks in main() until Shell_TrayWnd is visible.
+
+    Also cleans up any Task Scheduler task left by older agent versions.
     """
     if not is_windows():
         return False
     exe = _exe_path()
 
-    # Always remove the legacy HKCU\Run entry so the agent never double-launches.
+    # Clean up any Task Scheduler task from v1.2.4/v1.2.5 (best-effort; may fail
+    # if the user never had task-creation permission — that is fine).
     try:
-        import winreg
-        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE)
-        winreg.DeleteValue(k, TASK_NAME)
-        winreg.CloseKey(k)
+        _run_ps(
+            "Unregister-ScheduledTask -TaskName 'WitzoneAgent' "
+            "-Confirm:$false -ErrorAction SilentlyContinue",
+            timeout=10,
+        )
     except Exception:
         pass
 
-    if not enable:
-        rc, _ = _run_ps(
-            "Unregister-ScheduledTask -TaskName 'WitzoneAgent' "
-            "-Confirm:$false -ErrorAction SilentlyContinue",
-            timeout=20,
-        )
-        _log("set_autostart: task removed")
-        return True
-
     try:
-        import getpass
-        username = getpass.getuser()
-        exe_safe = exe.replace("'", "''")   # escape for PS single-quoted string
-        ps = (
-            f"$u = '{username}';"
-            f"$a = New-ScheduledTaskAction -Execute '{exe_safe}';"
-            f"$t = New-ScheduledTaskTrigger -AtLogOn -User $u;"
-            f"$t.Delay = 'PT30S';"
-            f"$s = New-ScheduledTaskSettingsSet "
-            f"-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0;"
-            f"$p = New-ScheduledTaskPrincipal -UserId $u -RunLevel Limited;"
-            f"Register-ScheduledTask -TaskName 'WitzoneAgent' "
-            f"-Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null"
+        import winreg
+        k = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_SET_VALUE,
         )
-        rc, stderr = _run_ps(ps, timeout=30)
-        if rc == 0:
-            _log(f"set_autostart: task created for user='{username}' exe='{exe}'")
-            return True
+        if enable:
+            winreg.SetValueEx(k, TASK_NAME, 0, winreg.REG_SZ, f'"{exe}"')
+            _log(f"set_autostart: HKCU\\Run entry added — '{exe}'")
         else:
-            _log(f"set_autostart FAILED rc={rc}: {stderr[:300]}")
-            return False
+            try:
+                winreg.DeleteValue(k, TASK_NAME)
+                _log("set_autostart: HKCU\\Run entry removed")
+            except FileNotFoundError:
+                pass
+        winreg.CloseKey(k)
+        return True
     except Exception as e:
         _log(f"set_autostart exception: {e}")
         return False
 
 
 def get_autostart():
-    """Return True if a WitzoneAgent startup task exists in Task Scheduler."""
+    """Return True if the HKCU\\Run entry exists."""
     if not is_windows():
         return False
-    rc, _ = _run_ps(
-        "if (Get-ScheduledTask -TaskName 'WitzoneAgent' "
-        "-ErrorAction SilentlyContinue) { exit 0 } else { exit 1 }",
-        timeout=10,
-    )
-    if rc == 0:
-        return True
-    # Also accept the legacy HKCU\Run entry (upgrade path from older versions)
     try:
         import winreg
-        k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE)
+        k = winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE,
+        )
         winreg.QueryValueEx(k, TASK_NAME)
         winreg.CloseKey(k)
         return True
@@ -633,21 +614,14 @@ def main():
     _wait_for_shell()
     _log("Shell ready")
 
-    # Migrate legacy HKCU\Run entry → Task Scheduler (first run after upgrade).
-    # Silently upgrades users who previously clicked "Start with Windows" on an
-    # older version so they don't need to toggle it off and on again.
-    if is_windows() and getattr(sys, "frozen", False):
-        try:
-            import winreg
-            k = winreg.OpenKey(winreg.HKEY_CURRENT_USER, STARTUP_KEY, 0, winreg.KEY_QUERY_VALUE)
-            winreg.QueryValueEx(k, TASK_NAME)
-            winreg.CloseKey(k)
-            # Legacy key found — replace it with the Task Scheduler task
-            _log("Migrating legacy HKCU\\Run → Task Scheduler")
+    # Auto-register HKCU\Run on every frozen startup if not already set.
+    # Runs before the user interacts with the tray so upgrades from v1.2.4/v1.2.5
+    # (Task Scheduler, which failed on non-admin accounts) are healed automatically.
+    # set_autostart() also cleans up any leftover Task Scheduler task.
+    if is_windows() and getattr(sys, 'frozen', False):
+        if not get_autostart():
             set_autostart(True)
-        except Exception:
-            pass   # key not present — nothing to migrate
-    _log(f"startup_task_exists={get_autostart()}")
+    _log(f"autostart={get_autostart()}")
 
     # Load and validate saved credentials
     cfg = load_config()

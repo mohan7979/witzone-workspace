@@ -9,7 +9,7 @@
 ; ============================================================================
 
 #define MyAppName     "Witzone Workspace Agent"
-#define MyAppVersion  "1.2.5"
+#define MyAppVersion  "1.2.6"
 #define MyAppPublisher "Witzone Technologies"
 #define MyAppExe      "WitzoneAgent.exe"
 
@@ -40,27 +40,27 @@ Name: "{group}\Witzone Agent";           Filename: "{app}\{#MyAppExe}"
 Name: "{group}\Uninstall Witzone Agent"; Filename: "{uninstallexe}"
 
 [Run]
-; 1. Remove any legacy HKCU\Run entry from older installs to prevent double-launch.
-Filename: "reg.exe"; \
-    Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v WitzoneAgent /f"; \
-    Flags: runhidden; StatusMsg: "Cleaning up old startup entry..."
+; 1. Clean up any Task Scheduler task left by v1.2.4/v1.2.5.
+;    Register-ScheduledTask requires admin rights on many BPO machines (GP
+;    restriction) so the agent now uses HKCU\Run instead — writable by any user.
+Filename: "schtasks.exe"; \
+    Parameters: "/Delete /TN ""WitzoneAgent"" /F"; \
+    Flags: runhidden; StatusMsg: "Cleaning up old startup task..."
 
-; 2. Register a Task Scheduler task via PowerShell (avoids all schtasks /TR
-;    quoting issues and the /IT-without-/RU silent-failure bug).
-;    -AtLogOn -User $env:USERNAME  — fires only for the installing user.
-;    $t.Delay = 'PT30S'            — 30-second ISO-8601 delay after logon so
-;    the notification area exists before pystray registers the tray icon.
-Filename: "powershell.exe"; \
-    Parameters: "-WindowStyle Hidden -NonInteractive -Command ""$u = $env:USERNAME; $a = New-ScheduledTaskAction -Execute '{app}\{#MyAppExe}'; $t = New-ScheduledTaskTrigger -AtLogOn -User $u; $t.Delay = 'PT30S'; $s = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit 0; $p = New-ScheduledTaskPrincipal -UserId $u -RunLevel Limited; Register-ScheduledTask -TaskName 'WitzoneAgent' -Action $a -Trigger $t -Settings $s -Principal $p -Force | Out-Null"""; \
-    Flags: runhidden waituntilterminated; StatusMsg: "Registering startup task..."
-
-; 3. Launch the agent right now so the employee doesn't have to reboot.
+; 2. Launch the agent as the original (non-elevated) user.
+;    On first run it writes its own HKCU\Run entry, so no installer-level
+;    registry write is needed and no admin permission issues can arise.
 Filename: "{app}\{#MyAppExe}"; Description: "Start Witzone Agent now"; \
     Flags: nowait postinstall skipifsilent runasoriginaluser
 
 [UninstallRun]
-; Stop the running agent, then remove the startup task.
+; Stop the running agent.
 Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExe} /F"; Flags: runhidden; RunOnceId: "KillAgent"
+; Remove HKCU\Run entry (runs as the original user so it targets their hive).
+Filename: "reg.exe"; \
+    Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v WitzoneAgent /f"; \
+    Flags: runhidden runasoriginaluser; RunOnceId: "DelReg"
+; Remove any leftover Task Scheduler task (v1.2.4/v1.2.5 artefact).
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ""WitzoneAgent"" /F"; \
     Flags: runhidden; RunOnceId: "DelTask"
 
