@@ -56,10 +56,14 @@ Filename: "{app}\{#MyAppExe}"; Description: "Start Witzone Agent now"; \
 [UninstallRun]
 ; Stop the running agent.
 Filename: "{cmd}"; Parameters: "/C taskkill /IM {#MyAppExe} /F"; Flags: runhidden; RunOnceId: "KillAgent"
-; Remove HKCU\Run entry (runs as the original user so it targets their hive).
+; Remove HKCU\Run entry. The agent writes this as the non-elevated user, so
+; this cleanup only works when the same account runs the uninstaller — if an
+; IT admin uninstalls it for another user, the orphaned key is harmless (Windows
+; skips missing exe paths silently at startup). runasoriginaluser is not valid
+; in [UninstallRun], so we rely on HKCU resolving to the uninstalling user.
 Filename: "reg.exe"; \
     Parameters: "delete ""HKCU\Software\Microsoft\Windows\CurrentVersion\Run"" /v WitzoneAgent /f"; \
-    Flags: runhidden runasoriginaluser; RunOnceId: "DelReg"
+    Flags: runhidden; RunOnceId: "DelReg"
 ; Remove any leftover Task Scheduler task (v1.2.4/v1.2.5 artefact).
 Filename: "schtasks.exe"; Parameters: "/Delete /TN ""WitzoneAgent"" /F"; \
     Flags: runhidden; RunOnceId: "DelTask"
