@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Download, AlertTriangle, CheckCircle2, FileSpreadsheet, FileText } from 'lucide-react';
 import { reportApi, userApi } from '@/api';
@@ -82,10 +82,75 @@ function rangeForView(view) {
   return { start: iso(new Date(d.getFullYear(), d.getMonth(), 1)), end: iso(d) };
 }
 
+function MultiSelect({ options, selected, onChange, placeholder }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+  const toggle = (val) => onChange(selected.includes(val) ? selected.filter(v => v !== val) : [...selected, val]);
+  const label = selected.length === 0 ? placeholder
+    : selected.length === 1 ? (options.find(o => o.value === selected[0])?.label ?? selected[0])
+    : `${selected.length} selected`;
+  return (
+    <div ref={ref} style={{ position:'relative' }}>
+      <button type="button" onClick={() => setOpen(p => !p)} style={{
+        display:'flex', alignItems:'center', gap:'6px', padding:'7px 28px 7px 10px',
+        fontSize:'12px', fontWeight:500, border:'1.5px solid rgba(255,255,255,0.1)', borderRadius:'10px',
+        background: open ? 'rgba(129,140,248,0.1)' : 'rgba(255,255,255,0.05)',
+        color: selected.length ? '#F1F5F9' : 'rgba(241,245,249,0.7)', cursor:'pointer',
+        minWidth:'140px', position:'relative', outline:'none', transition:'all 0.2s',
+      }}>
+        {label}
+        {selected.length > 0 && (
+          <span style={{ background:'#6366F1', color:'#fff', borderRadius:'10px', padding:'1px 6px', fontSize:'10px', fontWeight:700, marginLeft:'2px' }}>
+            {selected.length}
+          </span>
+        )}
+        <span style={{ position:'absolute', right:'8px', color:'rgba(148,163,184,0.8)', fontSize:'10px' }}>▾</span>
+      </button>
+      {open && (
+        <div style={{
+          position:'absolute', top:'calc(100% + 4px)', left:0, zIndex:200, minWidth:'200px',
+          background:'#1A1F2E', border:'1px solid rgba(255,255,255,0.1)', borderRadius:'10px',
+          boxShadow:'0 8px 32px rgba(0,0,0,0.4)', overflow:'hidden', maxHeight:'240px', overflowY:'auto',
+        }}>
+          {selected.length > 0 && (
+            <button type="button" onClick={() => { onChange([]); setOpen(false); }} style={{
+              width:'100%', padding:'8px 12px', textAlign:'left',
+              background:'rgba(248,113,113,0.08)', border:'none', borderBottom:'1px solid rgba(255,255,255,0.05)',
+              color:'#F87171', fontSize:'11px', fontWeight:600, cursor:'pointer',
+            }}>✕ Clear all</button>
+          )}
+          {options.map((opt) => {
+            const checked = selected.includes(opt.value);
+            return (
+              <label key={opt.value} style={{
+                display:'flex', alignItems:'center', gap:'8px', padding:'8px 12px', cursor:'pointer',
+                background: checked ? 'rgba(99,102,241,0.12)' : 'transparent',
+                borderBottom:'1px solid rgba(255,255,255,0.03)',
+                fontSize:'12px', color: checked ? '#F1F5F9' : 'rgba(241,245,249,0.65)',
+              }}>
+                <input type="checkbox" checked={checked} onChange={() => toggle(opt.value)}
+                  style={{ accentColor:'#6366F1', width:'13px', height:'13px', cursor:'pointer' }} />
+                {opt.label}
+              </label>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const EMPTY_FILTERS = { departments:[], employees:[], leaveType:'', leaveStatus:'', riskLevel:'' };
+
 export default function ReportsPage() {
   const [tab, setTab]       = useState('activity');
   const [range, setRange]   = useState({ start:new Date(new Date().setDate(1)).toISOString().split('T')[0], end:new Date().toISOString().split('T')[0] });
-  const [filters, setFilters] = useState({ department:'', employee:'', leaveType:'', leaveStatus:'', riskLevel:'' });
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [view, setView]     = useState('monthly');   // activity tab: daily | weekly | monthly
   const [exporting, setExporting] = useState(false);
 
@@ -96,13 +161,16 @@ export default function ReportsPage() {
   const { data:deptData }  = useQuery({ queryKey:['departments'], queryFn:userApi.departments, staleTime:5*60*1000 });
   const departments        = deptData?.departments || [];
   const { data:empData }   = useQuery({ queryKey:['report-employees'], queryFn:() => userApi.list({ limit:200 }) });
-  const employeeOptions    = (empData?.data || []).filter(u => !filters.department || u.department === filters.department);
+  const employeeOptions    = (empData?.data || []).filter(u => filters.departments.length === 0 || filters.departments.includes(u.department));
 
-  const attParams   = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }) };
-  const leaveParams = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }), ...(filters.leaveType && { type:filters.leaveType }), ...(filters.leaveStatus && { status:filters.leaveStatus }) };
-  const idleParams  = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }) };
+  const deptParam = filters.departments.join(',');
+  const empParam  = filters.employees.join(',');
 
-  const activityParams = { ...range, ...(filters.department && { department:filters.department }), ...(filters.employee && { user_id:filters.employee }) };
+  const attParams   = { ...range, ...(deptParam && { department:deptParam }), ...(empParam && { user_id:empParam }) };
+  const leaveParams = { ...range, ...(deptParam && { department:deptParam }), ...(empParam && { user_id:empParam }), ...(filters.leaveType && { type:filters.leaveType }), ...(filters.leaveStatus && { status:filters.leaveStatus }) };
+  const idleParams  = { ...range, ...(deptParam && { department:deptParam }), ...(empParam && { user_id:empParam }) };
+
+  const activityParams = { ...range, ...(deptParam && { department:deptParam }), ...(empParam && { user_id:empParam }) };
 
   const attReport   = useQuery({ queryKey:['report-attendance', attParams],  queryFn:() => reportApi.attendance(attParams),  enabled:tab==='attendance' });
   const leaveReport = useQuery({ queryKey:['report-leaves', leaveParams],    queryFn:() => reportApi.leaves(leaveParams),    enabled:tab==='leaves'     });
@@ -168,7 +236,7 @@ export default function ReportsPage() {
       {/* Tab bar */}
       <div style={{ display:'flex', gap:'3px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:'12px', padding:'4px', width:'fit-content' }}>
         {TABS.map(({ key, label, color }) => (
-          <button key={key} onClick={() => { setTab(key); setFilters({ department:'', employee:'', leaveType:'', leaveStatus:'', riskLevel:'' }); }} style={{
+          <button key={key} onClick={() => { setTab(key); setFilters(EMPTY_FILTERS); }} style={{
             padding:'8px 20px', fontSize:'13px', fontWeight:600,
             background: tab === key ? `rgba(${color==='#818CF8'?'129,140,248':color==='#F472B6'?'244,114,182':'167,139,250'},0.15)` : 'transparent',
             border:'none', cursor:'pointer',
@@ -186,17 +254,19 @@ export default function ReportsPage() {
       <div style={{ ...glass, padding:'14px 18px', display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
         <span style={{ fontSize:'10px', fontWeight:700, color:'rgba(241,245,249,0.25)', textTransform:'uppercase', letterSpacing:'1px', marginRight:'4px' }}>Filters</span>
 
-        <select value={filters.department} onChange={e => setFilters(f => ({ ...f, department:e.target.value, employee:'' }))} style={selectStyle}
-          onFocus={e => e.target.style.borderColor='rgba(129,140,248,0.5)'} onBlur={e => e.target.style.borderColor='rgba(255,255,255,0.1)'}>
-          <option value="" style={{ background:'#0D1117' }}>All Departments</option>
-          {departments.map(d => <option key={d} value={d} style={{ background:'#0D1117' }}>{d}</option>)}
-        </select>
+        <MultiSelect
+          options={departments.map(d => ({ value:d, label:d }))}
+          selected={filters.departments}
+          onChange={val => setFilters(f => ({ ...f, departments:val, employees:[] }))}
+          placeholder="All Departments"
+        />
 
-        <select value={filters.employee} onChange={e => setFilter('employee', e.target.value)} style={{ ...selectStyle, minWidth:'160px' }}
-          onFocus={e => e.target.style.borderColor='rgba(129,140,248,0.5)'} onBlur={e => e.target.style.borderColor='rgba(255,255,255,0.1)'}>
-          <option value="" style={{ background:'#0D1117' }}>All Employees</option>
-          {employeeOptions.map(u => <option key={u.id} value={u.id} style={{ background:'#0D1117' }}>{u.first_name} {u.last_name} ({u.employee_id})</option>)}
-        </select>
+        <MultiSelect
+          options={employeeOptions.map(u => ({ value:String(u.id), label:`${u.first_name} ${u.last_name} (${u.employee_id})` }))}
+          selected={filters.employees}
+          onChange={val => setFilter('employees', val)}
+          placeholder="All Employees"
+        />
 
         {tab === 'leaves' && (
           <>
@@ -222,16 +292,21 @@ export default function ReportsPage() {
           </select>
         )}
 
-        {Object.values(filters).some(Boolean) && (
+        {(filters.departments.length > 0 || filters.employees.length > 0 || filters.leaveType || filters.leaveStatus || filters.riskLevel) && (
           <>
-            <button onClick={() => setFilters({ department:'', employee:'', leaveType:'', leaveStatus:'', riskLevel:'' })} style={{
+            <button onClick={() => setFilters(EMPTY_FILTERS)} style={{
               padding:'6px 12px', fontSize:'11px', fontWeight:700,
               background:'rgba(248,113,113,0.1)', color:'#F87171',
               border:'1px solid rgba(248,113,113,0.25)', borderRadius:'7px', cursor:'pointer',
             }}>✕ Clear</button>
-            <span style={{ marginLeft:'auto', padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, background:`rgba(${activeTab?.color==='#818CF8'?'129,140,248':'99,102,241'},0.15)`, color:activeTab?.color, border:`1px solid ${activeTab?.color}40` }}>
-              {Object.values(filters).filter(Boolean).length} filter{Object.values(filters).filter(Boolean).length > 1 ? 's' : ''} active
-            </span>
+            {(() => {
+              const n = [filters.departments.length > 0, filters.employees.length > 0, !!filters.leaveType, !!filters.leaveStatus, !!filters.riskLevel].filter(Boolean).length;
+              return (
+                <span style={{ marginLeft:'auto', padding:'3px 10px', borderRadius:'20px', fontSize:'11px', fontWeight:700, background:`rgba(${activeTab?.color==='#818CF8'?'129,140,248':'99,102,241'},0.15)`, color:activeTab?.color, border:`1px solid ${activeTab?.color}40` }}>
+                  {n} filter{n > 1 ? 's' : ''} active
+                </span>
+              );
+            })()}
           </>
         )}
       </div>
@@ -274,16 +349,16 @@ export default function ReportsPage() {
           <div style={glass}>
             <TableToolbar search={actTc.search} setSearch={actTc.setSearch} total={actTc.total} placeholder="Search name, ID, dept or status…" />
             <div style={{ overflowX:'auto' }}>
-              <table style={{ width:'100%', minWidth:'1100px', borderCollapse:'collapse' }}>
+              <table style={{ width:'100%', minWidth:'1280px', borderCollapse:'collapse' }}>
                 <thead><tr>
                   <SortTh label="Date"     sortKey="date"   sort={actTc.sort} toggleSort={actTc.toggleSort} />
                   <SortTh label="Employee" sortKey="name"   sort={actTc.sort} toggleSort={actTc.toggleSort} />
-                  {['Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time','Effective Hours'].map(h => <th key={h} style={S.th}>{h}</th>)}
+                  {['Clock In','Clock Out','2nd Clock In','2nd Clock Out','Break In / Out','Total Break','Idle Time','Effective Hours','Overall Total Hrs'].map(h => <th key={h} style={S.th}>{h}</th>)}
                   <SortTh label="Status"   sortKey="status" sort={actTc.sort} toggleSort={actTc.toggleSort} />
                 </tr></thead>
                 <tbody>
-                  {activity.isLoading && <tr><td colSpan={11} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
-                  {!activity.isLoading && !actTc.total && <tr><td colSpan={11} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
+                  {activity.isLoading && <tr><td colSpan={12} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>Loading…</td></tr>}
+                  {!activity.isLoading && !actTc.total && <tr><td colSpan={12} style={{ padding:'48px', textAlign:'center', fontSize:'13px', color:'rgba(241,245,249,0.2)' }}>No activity records for this range</td></tr>}
                   {actTc.view.map((row, i) => (
                     <tr key={i} style={{ transition:'background 0.12s' }} onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.025)'} onMouseLeave={e => e.currentTarget.style.background='transparent'}>
                       <td style={{ ...S.td, fontSize:'12px', whiteSpace:'nowrap' }}>{formatDate(row.date)}</td>
@@ -299,6 +374,7 @@ export default function ReportsPage() {
                       <td style={{ ...S.td, fontWeight:700, color:'#FBBF24', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{formatHMS(row.total_break_seconds)}</td>
                       <td style={{ ...S.td, fontWeight:700, color: (row.idle_seconds||0) > 1800 ? '#F87171' : 'rgba(241,245,249,0.5)', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{formatHMS(row.idle_seconds)}</td>
                       <td style={{ ...S.td, fontWeight:700, color:'#818CF8', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{row.effective_hours != null ? formatHMS(Math.round(row.effective_hours * 3600)) : '—'}</td>
+                      <td style={{ ...S.td, fontWeight:700, color:'#60A5FA', fontVariantNumeric:'tabular-nums', whiteSpace:'nowrap' }}>{row.overall_total_seconds != null ? formatHMS(row.overall_total_seconds) : '—'}</td>
                       <td style={S.td}><Badge status={row.status} /></td>
                     </tr>
                   ))}

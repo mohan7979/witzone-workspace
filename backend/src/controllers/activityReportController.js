@@ -17,8 +17,13 @@ const fmtHMS = (secs) => {
 /* ── core data builder (shared by JSON + every export format) ───────────── */
 async function buildActivityRows({ start, end, userId, department, requesterRole, requesterId }) {
   const userWhere = { status: 'active' };
-  if (department) userWhere.department = department;
-  if (userId)     userWhere.id = userId;
+  // Support comma-separated multi-value (e.g. department="Billing,Posting")
+  const deptList = department ? String(department).split(',').map(s => s.trim()).filter(Boolean) : [];
+  const userList = userId     ? String(userId).split(',').map(s => s.trim()).filter(Boolean)     : [];
+  if (deptList.length > 1)       userWhere.department = { [Op.in]: deptList };
+  else if (deptList.length === 1) userWhere.department = deptList[0];
+  if (userList.length > 1)       userWhere.id = { [Op.in]: userList };
+  else if (userList.length === 1) userWhere.id = userList[0];
   // Leads are scoped to their own team; HR / Superuser see everyone.
   if (requesterRole === 'lead') userWhere.manager_id = requesterId;
 
@@ -49,6 +54,10 @@ async function buildActivityRows({ start, end, userId, department, requesterRole
     const recBreaks = (breakMap[`${a.user_id}|${a.date}`] || []).map((b) => ({
       in: b.break_start, out: b.break_end, duration_seconds: b.duration_seconds || 0,
     }));
+    const grossSecs1 = (a.login_time && a.logout_time)
+      ? Math.max(0, Math.round((new Date(a.logout_time) - new Date(a.login_time)) / 1000)) : 0;
+    const grossSecs2 = (a.login_time_2 && a.logout_time_2)
+      ? Math.max(0, Math.round((new Date(a.logout_time_2) - new Date(a.login_time_2)) / 1000)) : 0;
     return {
       employee_id: a.user?.employee_id || '',
       name:        `${a.user?.first_name || ''} ${a.user?.last_name || ''}`.trim(),
@@ -59,10 +68,11 @@ async function buildActivityRows({ start, end, userId, department, requesterRole
       clock_in_2:  a.login_time_2,
       clock_out_2: a.logout_time_2,
       breaks:      recBreaks,
-      total_break_seconds: a.total_break_seconds || 0,
-      idle_seconds:        a.idle_seconds || 0,
-      total_hours:         a.total_hours,
-      effective_hours:     a.effective_hours,
+      total_break_seconds:    a.total_break_seconds || 0,
+      idle_seconds:           a.idle_seconds || 0,
+      total_hours:            a.total_hours,
+      effective_hours:        a.effective_hours,
+      overall_total_seconds:  grossSecs1 + grossSecs2,
       status:      a.status,
     };
   });
@@ -88,7 +98,8 @@ const COLUMNS = [
   { key: 'breaks',      header: 'Break In / Out',    w: 34, breaks: true },
   { key: 'total_break_seconds', header: 'Total Break', w: 13, hms: true },
   { key: 'idle_seconds',        header: 'Idle Time',   w: 13, hms: true },
-  { key: 'effective_hours',     header: 'Effective Hours', w: 15, hours: true },
+  { key: 'effective_hours',       header: 'Effective Hours',    w: 15, hours: true },
+  { key: 'overall_total_seconds', header: 'Overall Total Hours', w: 18, hms: true },
   { key: 'status',      header: 'Status',            w: 11 },
 ];
 
@@ -152,8 +163,9 @@ function sendPdf(res, rows, start, end) {
     { key: 'clock_out_2', header: '2nd Out', w: 56, time: true },
     { key: 'idle_seconds', header: 'Idle', w: 58, hms: true },
     { key: 'total_break_seconds', header: 'Break', w: 58, hms: true },
-    { key: 'effective_hours', header: 'Effective', w: 60, hours: true },
-    { key: 'status', header: 'Status', w: 56 },
+    { key: 'effective_hours',       header: 'Effective', w: 54, hours: true },
+    { key: 'overall_total_seconds', header: 'Total Hrs',  w: 54, hms: true },
+    { key: 'status', header: 'Status', w: 50 },
   ];
   const startX = doc.x;
   let y = doc.y;

@@ -274,7 +274,7 @@ exports.cancel = asyncHandler(async (req, res) => {
 
 // ─── Pending leaves list (scoped by role) ─────────────────────────────────────
 exports.pendingLeaves = asyncHandler(async (req, res) => {
-  const { type, status, page = 1, limit = 20 } = req.query;
+  const { type, status, page = 1, limit = 20, employee, date_from, date_to, month } = req.query;
   const isHR    = req.user.role === 'hr';
   const isLead  = req.user.role === 'lead';
   const isSuper = req.user.role === 'superuser';
@@ -320,6 +320,18 @@ exports.pendingLeaves = asyncHandler(async (req, res) => {
     } else {
       leaveWhere.status = status;
     }
+  }
+
+  // Additional filters (applied after role-based scoping, do not override it)
+  if (employee) userWhere.id = employee;
+  if (month) {
+    const [y, m] = month.split('-');
+    leaveWhere.start_date = { [Op.between]: [`${y}-${m.padStart(2, '0')}-01`, moment(`${y}-${m}`, 'YYYY-MM').endOf('month').format('YYYY-MM-DD')] };
+  } else if (date_from || date_to) {
+    const sd = {};
+    if (date_from) sd[Op.gte] = date_from;
+    if (date_to)   sd[Op.lte] = date_to;
+    leaveWhere.start_date = sd;
   }
 
   const { count, rows } = await Leave.findAndCountAll({
@@ -481,5 +493,65 @@ exports.resetAnnualLeaves = asyncHandler(async (req, res) => {
     message: `Annual leave balances reset for ${year}. ${employees.length} employee(s) updated.`,
     year,
     details: results,
+  });
+});
+
+exports.leaveStats = asyncHandler(async (req, res) => {
+  const { month, year } = req.query;
+  const isLead = req.user.role === 'lead';
+  const isHR   = req.user.role === 'hr';
+
+  const userWhere  = { status: 'active' };
+  if (isLead) {
+    userWhere.manager_id = req.user.id;
+    userWhere.role = 'employee';
+  } else if (isHR) {
+    userWhere.role = 'employee';
+  }
+  // Superuser sees all
+
+  const leaveWhere = {};
+  if (month) {
+    const [y, m] = month.split('-');
+    leaveWhere.start_date = { [Op.between]: [`${y}-${m.padStart(2, '0')}-01`, moment(`${y}-${m}`, 'YYYY-MM').endOf('month').format('YYYY-MM-DD')] };
+  } else if (year) {
+    leaveWhere.start_date = { [Op.between]: [`${year}-01-01`, `${year}-12-31`] };
+  } else {
+    const now = new Date();
+    const y = now.getFullYear(), m = String(now.getMonth() + 1).padStart(2, '0');
+    leaveWhere.start_date = { [Op.between]: [`${y}-${m}-01`, moment(`${y}-${m}`, 'YYYY-MM').endOf('month').format('YYYY-MM-DD')] };
+  }
+
+  const leaves = await Leave.findAll({
+    where: leaveWhere,
+    include: [{
+      model: User, as: 'user', where: userWhere,
+      attributes: ['id', 'employee_id', 'first_name', 'last_name', 'department'],
+    }],
+  });
+
+  const monthly_total = leaves.length;
+  const empMap = {};
+  for (const lv of leaves) {
+    const uid = lv.user_id;
+    if (!empMap[uid]) {
+      empMap[uid] = {
+        user_id: uid,
+        employee_id: lv.user?.employee_id,
+        name: `${lv.user?.first_name} ${lv.user?.last_name}`,
+        department: lv.user?.department,
+        total: 0, approved: 0, rejected: 0, pending: 0,
+      };
+    }
+    empMap[uid].total++;
+    if (lv.status === 'approved') empMap[uid].approved++;
+    else if (lv.status === 'rejected') empMap[uid].rejected++;
+    else if (lv.status === 'pending') empMap[uid].pending++;
+  }
+
+  res.json({
+    monthly_total,
+    by_employee: Object.values(empMap).sort((a, b) => b.total - a.total),
+    period: { month, year },
   });
 });

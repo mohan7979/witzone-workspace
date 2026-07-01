@@ -20,56 +20,107 @@ async function sendIdleHistoryXlsx(res, { period, startDate, endDate, data, dail
   const wb = new ExcelJS.Workbook();
   wb.creator = 'Witzone HRMS';
 
+  const _rowFill = (perf) => {
+    if (perf == null) return null;
+    return perf >= 80 ? { argb: 'FFD4EDDA' } : perf >= 60 ? { argb: 'FFFFF3CD' } : { argb: 'FFF8D7DA' };
+  };
+
   // Sheet 1 — per-employee summary over the whole period
   const sum = wb.addWorksheet('Summary');
   sum.columns = [
-    { header: 'Employee ID', key: 'eid', width: 12 },
-    { header: 'Employee', key: 'name', width: 24 },
-    { header: 'Department', key: 'dept', width: 16 },
-    { header: 'Present Days', key: 'days', width: 13 },
-    { header: 'Work Time', key: 'work', width: 13 },
-    { header: 'Idle Time', key: 'idle', width: 13 },
-    { header: 'Break Time', key: 'brk', width: 13 },
-    { header: 'Effective Time', key: 'eff', width: 14 },
-    { header: 'Idle Events', key: 'ev', width: 12 },
+    { header: 'Employee ID',       key: 'eid',  width: 12 },
+    { header: 'Employee',          key: 'name', width: 24 },
+    { header: 'Department',        key: 'dept', width: 16 },
+    { header: 'Present Days',      key: 'days', width: 13 },
+    { header: 'Work Time',         key: 'work', width: 13 },
+    { header: 'Idle Time',         key: 'idle', width: 13 },
+    { header: 'Break Time',        key: 'brk',  width: 13 },
+    { header: 'Effective Time',    key: 'eff',  width: 14 },
+    { header: 'Performance %',     key: 'perf', width: 14 },
+    { header: 'Idle Events',       key: 'ev',   width: 12 },
     { header: 'Long Idle (>=30m)', key: 'long', width: 16 },
   ];
-  for (const r of data) sum.addRow({
-    eid: r.user.employee_id, name: `${r.user.first_name} ${r.user.last_name}`, dept: r.user.department || '',
-    days: r.present_days, work: _hrsHms(r.work_hours), idle: _hms(r.idle_seconds),
-    brk: _hms(r.break_seconds), eff: _hrsHms(r.effective_hours), ev: r.idle_events, long: r.long_idle,
-  });
+  for (const r of data) {
+    const perf_num = r.work_hours > 0 ? Math.round((r.effective_hours / r.work_hours) * 100) : null;
+    sum.addRow({
+      eid: r.user.employee_id, name: `${r.user.first_name} ${r.user.last_name}`, dept: r.user.department || '',
+      days: r.present_days, work: _hrsHms(r.work_hours), idle: _hms(r.idle_seconds),
+      brk: _hms(r.break_seconds), eff: _hrsHms(r.effective_hours),
+      perf: perf_num != null ? `${perf_num}%` : '—',
+      ev: r.idle_events, long: r.long_idle,
+    });
+    const fill = _rowFill(perf_num);
+    if (fill) sum.lastRow.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: fill }; });
+  }
 
   // Sheet 2 — day-by-day idle / working timeline per employee
   const tl = wb.addWorksheet('Daily Timeline');
   tl.columns = [
-    { header: 'Date', key: 'date', width: 13 },
-    { header: 'Employee ID', key: 'eid', width: 12 },
-    { header: 'Employee', key: 'name', width: 24 },
-    { header: 'Department', key: 'dept', width: 16 },
-    { header: 'Clock In', key: 'in', width: 11 },
-    { header: 'Clock Out', key: 'out', width: 11 },
-    { header: '2nd In', key: 'in2', width: 11 },
-    { header: '2nd Out', key: 'out2', width: 11 },
-    { header: 'Work Time', key: 'work', width: 12 },
-    { header: 'Idle Time', key: 'idle', width: 12 },
-    { header: 'Break Time', key: 'brk', width: 12 },
-    { header: 'Effective Time', key: 'eff', width: 13 },
-    { header: 'Status', key: 'status', width: 11 },
+    { header: 'Date',           key: 'date',   width: 13 },
+    { header: 'Employee ID',    key: 'eid',    width: 12 },
+    { header: 'Employee',       key: 'name',   width: 24 },
+    { header: 'Department',     key: 'dept',   width: 16 },
+    { header: 'Clock In',       key: 'in',     width: 11 },
+    { header: 'Clock Out',      key: 'out',    width: 11 },
+    { header: '2nd In',         key: 'in2',    width: 11 },
+    { header: '2nd Out',        key: 'out2',   width: 11 },
+    { header: 'Work Time',      key: 'work',   width: 12 },
+    { header: 'Idle Time',      key: 'idle',   width: 12 },
+    { header: 'Break Time',     key: 'brk',    width: 12 },
+    { header: 'Effective Time', key: 'eff',    width: 13 },
+    { header: 'Performance %',  key: 'perf',   width: 13 },
+    { header: 'Status',         key: 'status', width: 11 },
   ];
   const sorted = daily.slice().sort((a, b) => {
     const an = `${a.user?.first_name} ${a.user?.last_name}`, bn = `${b.user?.first_name} ${b.user?.last_name}`;
     return an === bn ? String(a.date).localeCompare(String(b.date)) : an.localeCompare(bn);
   });
-  for (const a of sorted) tl.addRow({
-    date: _day(a.date), eid: a.user?.employee_id || '',
-    name: `${a.user?.first_name || ''} ${a.user?.last_name || ''}`.trim(), dept: a.user?.department || '',
-    in: _clock(a.login_time), out: _clock(a.logout_time), in2: _clock(a.login_time_2), out2: _clock(a.logout_time_2),
-    work: _hrsHms(a.total_hours), idle: _hms(a.idle_seconds), brk: _hms(a.total_break_seconds),
-    eff: _hrsHms(a.effective_hours), status: a.status,
-  });
+  for (const a of sorted) {
+    const workSecs = Number(a.total_hours || 0) * 3600;
+    const effSecs  = Number(a.effective_hours || 0) * 3600;
+    const perf_num = workSecs > 0 ? Math.round((effSecs / workSecs) * 100) : null;
+    tl.addRow({
+      date: _day(a.date), eid: a.user?.employee_id || '',
+      name: `${a.user?.first_name || ''} ${a.user?.last_name || ''}`.trim(), dept: a.user?.department || '',
+      in: _clock(a.login_time), out: _clock(a.logout_time), in2: _clock(a.login_time_2), out2: _clock(a.logout_time_2),
+      work: _hrsHms(a.total_hours), idle: _hms(a.idle_seconds), brk: _hms(a.total_break_seconds),
+      eff: _hrsHms(a.effective_hours), perf: perf_num != null ? `${perf_num}%` : '—', status: a.status,
+    });
+    const fill = _rowFill(perf_num);
+    if (fill) tl.lastRow.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: fill }; });
+  }
 
-  for (const ws of [sum, tl]) {
+  // Sheet 3 — department aggregate summary
+  const dept = wb.addWorksheet('Department Summary');
+  dept.columns = [
+    { header: 'Department',           key: 'dept', width: 18 },
+    { header: 'Employees',            key: 'emp',  width: 12 },
+    { header: 'Total Work Time',      key: 'work', width: 16 },
+    { header: 'Total Idle Time',      key: 'idle', width: 16 },
+    { header: 'Total Break Time',     key: 'brk',  width: 16 },
+    { header: 'Total Effective Time', key: 'eff',  width: 18 },
+    { header: 'Avg Performance %',    key: 'perf', width: 17 },
+    { header: 'Total Idle Events',    key: 'ev',   width: 17 },
+  ];
+  const deptMap = {};
+  for (const r of data) {
+    const d = r.user?.department || 'Unknown';
+    if (!deptMap[d]) deptMap[d] = { emp: 0, work: 0, idle: 0, brk: 0, eff: 0, ev: 0 };
+    deptMap[d].emp++;
+    deptMap[d].work += r.work_hours;
+    deptMap[d].idle += r.idle_seconds;
+    deptMap[d].brk  += r.break_seconds;
+    deptMap[d].eff  += r.effective_hours;
+    deptMap[d].ev   += r.idle_events;
+  }
+  for (const [d, r] of Object.entries(deptMap).sort(([a], [b]) => a.localeCompare(b))) {
+    const perf_num = r.work > 0 ? Math.round((r.eff / r.work) * 100) : null;
+    dept.addRow({ dept: d, emp: r.emp, work: _hrsHms(r.work), idle: _hms(r.idle), brk: _hms(r.brk), eff: _hrsHms(r.eff), perf: perf_num != null ? `${perf_num}%` : '—', ev: r.ev });
+    const fill = _rowFill(perf_num);
+    if (fill) dept.lastRow.eachCell({ includeEmpty: true }, cell => { cell.fill = { type: 'pattern', pattern: 'solid', fgColor: fill }; });
+  }
+
+  for (const ws of [sum, tl, dept]) {
     ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
     ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF6366F1' } };
     ws.autoFilter = { from: 'A1', to: `${String.fromCharCode(64 + ws.columns.length)}1` };

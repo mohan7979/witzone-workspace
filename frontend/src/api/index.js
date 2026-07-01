@@ -31,6 +31,7 @@ export const leaveApi = {
   document:         (id)       => api.get(`/leaves/${id}/document`, { responseType: 'blob' }),
   cancel:           (id)       => api.patch(`/leaves/${id}/cancel`),
   pending:          (params)   => api.get('/leaves/pending', { params }),
+  stats:            (params)   => api.get('/leaves/stats', { params }),
   tlReview:         (id, data) => api.patch(`/leaves/${id}/tl-review`, data),
   hrReview:         (id, data) => api.patch(`/leaves/${id}/hr-review`, data),
   getPolicy:        ()         => api.get('/leaves/policy'),

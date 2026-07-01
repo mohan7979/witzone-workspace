@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react';
 import Avatar from '@/components/ui/Avatar';
 import { useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { CheckCircle, XCircle, X, GitBranch, Paperclip } from 'lucide-react';
-import { leaveApi } from '@/api';
+import { CheckCircle, XCircle, X, GitBranch, Paperclip, Filter, BarChart2 } from 'lucide-react';
+import { leaveApi, userApi } from '@/api';
 import useAuthStore from '@/store/authStore';
 import { formatDate, leaveStage, leaveDurationLabel } from '@/lib/utils';
 import LeaveWorkflowModal, { openLeaveDocument } from '@/components/LeaveWorkflowModal';
@@ -227,15 +227,47 @@ export default function LeaveManagementPage() {
   const [selected, setSelected] = useState(null);
   const [detail,   setDetail]   = useState(null);
   const [filter,   setFilter]   = useState('pending');
+  const [empFilter,   setEmpFilter]   = useState('');
+  const [monthFilter, setMonthFilter] = useState('');
+  const [dateFrom,    setDateFrom]    = useState('');
+  const [dateTo,      setDateTo]      = useState('');
+  const [showFilters, setShowFilters] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
 
   const FILTERS = isLead
     ? ['pending', 'approved', 'rejected']
     : ['pending', 'approved', 'rejected', 'all'];
 
+  const queryParams = {
+    status: filter, limit: 100,
+    ...(empFilter   && { employee: empFilter }),
+    ...(monthFilter && { month: monthFilter }),
+    ...(!monthFilter && dateFrom && { date_from: dateFrom }),
+    ...(!monthFilter && dateTo   && { date_to: dateTo }),
+  };
+
   const { data, isLoading } = useQuery({
-    queryKey: ['pending-leaves', filter],
-    queryFn:  () => leaveApi.pending({ status: filter, limit: 100 }),
+    queryKey: ['pending-leaves', filter, empFilter, monthFilter, dateFrom, dateTo],
+    queryFn:  () => leaveApi.pending(queryParams),
   });
+
+  const statsMonth = monthFilter || new Date().toISOString().slice(0, 7);
+  const { data: statsData } = useQuery({
+    queryKey: ['leave-stats', statsMonth],
+    queryFn:  () => leaveApi.stats({ month: statsMonth }),
+    enabled:  showSummary,
+  });
+
+  const { data: empListData } = useQuery({
+    queryKey: ['leave-emp-list'],
+    queryFn:  () => userApi.list({ limit: 300 }),
+    staleTime: 5 * 60 * 1000,
+    enabled: showFilters,
+  });
+  const teamEmployees = (empListData?.data || []).filter(u => ['employee', 'lead', 'hr'].includes(u.role));
+
+  const hasActiveFilters = !!(empFilter || monthFilter || dateFrom || dateTo);
+  const clearFilters = () => { setEmpFilter(''); setMonthFilter(''); setDateFrom(''); setDateTo(''); };
 
   const tc = useTableControls(data?.data || [], {
     searchKeys: ['user.first_name', 'user.last_name', 'user.department', 'type', 'reason', (r) => TYPE_LABELS[r.type]],
@@ -295,18 +327,131 @@ export default function LeaveManagementPage() {
         </div>
       </div>
 
-      {/* Filter tabs */}
-      <div style={{ display:'flex', gap:'3px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:'12px', padding:'4px', width:'fit-content' }}>
-        {FILTERS.map((s) => (
-          <button key={s} onClick={() => setFilter(s)} style={{
-            padding:'7px 18px', fontSize:'12px', fontWeight:600, borderRadius:'9px',
-            border:'none', cursor:'pointer', textTransform:'capitalize', transition:'all 0.15s',
-            background: filter === s ? 'rgba(244,114,182,0.15)' : 'transparent',
-            color:      filter === s ? '#F472B6' : 'rgba(241,245,249,0.4)',
-            boxShadow:  filter === s ? '0 0 0 1px rgba(244,114,182,0.3)' : 'none',
-          }}>{s}</button>
-        ))}
+      {/* Filter tabs + action buttons */}
+      <div style={{ display:'flex', alignItems:'center', gap:'10px', flexWrap:'wrap' }}>
+        <div style={{ display:'flex', gap:'3px', background:'rgba(255,255,255,0.04)', border:'1px solid rgba(255,255,255,0.07)', borderRadius:'12px', padding:'4px' }}>
+          {FILTERS.map((s) => (
+            <button key={s} onClick={() => setFilter(s)} style={{
+              padding:'7px 18px', fontSize:'12px', fontWeight:600, borderRadius:'9px',
+              border:'none', cursor:'pointer', textTransform:'capitalize', transition:'all 0.15s',
+              background: filter === s ? 'rgba(244,114,182,0.15)' : 'transparent',
+              color:      filter === s ? '#F472B6' : 'rgba(241,245,249,0.4)',
+              boxShadow:  filter === s ? '0 0 0 1px rgba(244,114,182,0.3)' : 'none',
+            }}>{s}</button>
+          ))}
+        </div>
+        <button onClick={() => setShowFilters(p => !p)} style={{
+          display:'inline-flex', alignItems:'center', gap:'6px', padding:'7px 14px',
+          fontSize:'12px', fontWeight:600, borderRadius:'10px', cursor:'pointer', transition:'all 0.15s',
+          background: showFilters || hasActiveFilters ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.05)',
+          border: `1px solid ${showFilters || hasActiveFilters ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.1)'}`,
+          color: showFilters || hasActiveFilters ? '#818CF8' : 'rgba(241,245,249,0.5)',
+        }}>
+          <Filter size={12} /> Filters {hasActiveFilters && <span style={{ background:'#6366F1', color:'#fff', borderRadius:'10px', padding:'1px 5px', fontSize:'10px', fontWeight:700 }}>{[empFilter,monthFilter,dateFrom,dateTo].filter(Boolean).length}</span>}
+        </button>
+        <button onClick={() => setShowSummary(p => !p)} style={{
+          display:'inline-flex', alignItems:'center', gap:'6px', padding:'7px 14px',
+          fontSize:'12px', fontWeight:600, borderRadius:'10px', cursor:'pointer', transition:'all 0.15s',
+          background: showSummary ? 'rgba(52,211,153,0.15)' : 'rgba(255,255,255,0.05)',
+          border: `1px solid ${showSummary ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.1)'}`,
+          color: showSummary ? '#34D399' : 'rgba(241,245,249,0.5)',
+        }}>
+          <BarChart2 size={12} /> Monthly Stats
+        </button>
       </div>
+
+      {/* Expandable filter bar */}
+      {showFilters && (
+        <div style={{ ...glass, padding:'14px 20px', display:'flex', gap:'14px', flexWrap:'wrap', alignItems:'flex-end' }}>
+          <div>
+            <label style={S.label}>Employee</label>
+            <select value={empFilter} onChange={e => setEmpFilter(e.target.value)} style={{ padding:'8px 28px 8px 10px', fontSize:'12px', fontWeight:500, border:'1.5px solid rgba(255,255,255,0.1)', borderRadius:'10px', background:'rgba(255,255,255,0.05)', color: empFilter ? '#F1F5F9' : 'rgba(241,245,249,0.7)', outline:'none', cursor:'pointer', appearance:'none', backgroundImage:`url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%2394a3b8' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E")`, backgroundRepeat:'no-repeat', backgroundPosition:'right 8px center', minWidth:'180px' }}>
+              <option value="" style={{ background:'#0D1117' }}>All Employees</option>
+              {teamEmployees.map(u => <option key={u.id} value={String(u.id)} style={{ background:'#0D1117' }}>{u.first_name} {u.last_name} ({u.employee_id})</option>)}
+            </select>
+          </div>
+          <div>
+            <label style={S.label}>Month</label>
+            <input type="month" value={monthFilter} onChange={e => { setMonthFilter(e.target.value); setDateFrom(''); setDateTo(''); }}
+              style={{ ...S.input, width:'auto', padding:'8px 12px' }} />
+          </div>
+          <div>
+            <label style={S.label}>Date From</label>
+            <input type="date" value={dateFrom} disabled={!!monthFilter} onChange={e => { setDateFrom(e.target.value); setMonthFilter(''); }}
+              style={{ ...S.input, width:'auto', padding:'8px 12px', opacity: monthFilter ? 0.4 : 1 }} />
+          </div>
+          <div>
+            <label style={S.label}>Date To</label>
+            <input type="date" value={dateTo} disabled={!!monthFilter} onChange={e => { setDateTo(e.target.value); setMonthFilter(''); }}
+              style={{ ...S.input, width:'auto', padding:'8px 12px', opacity: monthFilter ? 0.4 : 1 }} />
+          </div>
+          {hasActiveFilters && (
+            <button onClick={clearFilters} style={{ padding:'8px 14px', fontSize:'11px', fontWeight:700, background:'rgba(248,113,113,0.1)', color:'#F87171', border:'1px solid rgba(248,113,113,0.25)', borderRadius:'8px', cursor:'pointer' }}>
+              ✕ Clear
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Monthly Stats panel */}
+      {showSummary && (
+        <div style={glass}>
+          <div style={{ padding:'16px 20px 12px', display:'flex', alignItems:'center', justifyContent:'space-between' }}>
+            <div>
+              <p style={{ fontSize:'13px', fontWeight:700, color:'#F1F5F9' }}>Monthly Summary — {statsMonth.replace('-', ' / ')}</p>
+              <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.35)', marginTop:'2px' }}>All leave requests across all statuses</p>
+            </div>
+            {statsData && (
+              <div style={{ display:'flex', gap:'10px' }}>
+                {[
+                  { label:'Total', val: statsData.monthly_total, color:'#818CF8' },
+                  { label:'Approved', val: statsData.by_employee?.reduce((s, e) => s + e.approved, 0) ?? 0, color:'#34D399' },
+                  { label:'Pending',  val: statsData.by_employee?.reduce((s, e) => s + e.pending,  0) ?? 0, color:'#FBBF24' },
+                  { label:'Rejected', val: statsData.by_employee?.reduce((s, e) => s + e.rejected, 0) ?? 0, color:'#F87171' },
+                ].map(({ label, val, color }) => (
+                  <div key={label} style={{ textAlign:'center', padding:'8px 16px', borderRadius:'10px', background:'rgba(255,255,255,0.04)', border:`1px solid ${color}30`, minWidth:'64px' }}>
+                    <p style={{ fontSize:'20px', fontWeight:800, color, lineHeight:1 }}>{val}</p>
+                    <p style={{ fontSize:'10px', color:'rgba(241,245,249,0.4)', fontWeight:600, marginTop:'3px', textTransform:'uppercase', letterSpacing:'0.5px' }}>{label}</p>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          {statsData?.by_employee?.length > 0 && (
+            <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)' }}>
+              <p style={{ padding:'10px 20px 6px', fontSize:'10px', fontWeight:700, color:'rgba(241,245,249,0.3)', textTransform:'uppercase', letterSpacing:'0.8px' }}>Individual Leave Summary</p>
+              <div style={{ overflowX:'auto' }}>
+                <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                  <thead>
+                    <tr>
+                      {['Employee', 'Department', 'Total', 'Approved', 'Pending', 'Rejected'].map(h => (
+                        <th key={h} style={S.th}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {statsData.by_employee.map((e) => (
+                      <tr key={e.user_id} style={{ transition:'background 0.12s' }}
+                        onMouseEnter={ev => ev.currentTarget.style.background='rgba(255,255,255,0.025)'}
+                        onMouseLeave={ev => ev.currentTarget.style.background='transparent'}>
+                        <td style={S.td}>
+                          <p style={{ fontWeight:600, color:'#F1F5F9', fontSize:'13px' }}>{e.name}</p>
+                          <p style={{ fontSize:'11px', color:'rgba(241,245,249,0.3)', marginTop:'1px' }}>{e.employee_id}</p>
+                        </td>
+                        <td style={S.td}>{e.department || '—'}</td>
+                        <td style={{ ...S.td, fontWeight:700, color:'#F1F5F9' }}>{e.total}</td>
+                        <td style={{ ...S.td, fontWeight:700, color:'#34D399' }}>{e.approved}</td>
+                        <td style={{ ...S.td, fontWeight:700, color:'#FBBF24' }}>{e.pending}</td>
+                        <td style={{ ...S.td, fontWeight:700, color:'#F87171' }}>{e.rejected}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Table */}
       <div style={glass}>
